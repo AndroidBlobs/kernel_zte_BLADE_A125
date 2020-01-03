@@ -343,6 +343,91 @@ config ARCH_MSM8909
 	select DEVFREQ_GOV_MSM_BW_HWMON
 	select MSM_BIMC_BWMON
 	select ARCH_WANT_KMAP_ATOMIC_FLUSH
-
+	select ZTE_BOOT_MODE
 endmenu
+
+config ZTE_BOOT_MODE
+    depends on ARCH_MSM8909
+    bool "ZTE BOOT MODE"
+    default n
+    help
+      Support for boot mode
+
+menu "MSM Board Selection"
+
+config ZTE_PIL_AUTH_ERROR_DETECTION
+	bool "ZTE PIL AUTH ERROR DETECTION"
+	default n
+	help
+	  When authorization of PIL images is failed, the system
+	  will enter into UNAUTH mode to show related error message.
+
+config BOARD_GRAYJOYLITE
+    depends on ARCH_MSM8909
+    bool "ZTE GRAYJOYLITE"
+    help
+      Support for ZTE MSM8909 GRAYJOYLITE device.
+
+config BOARD_AYERS
+    depends on ARCH_MSM8909
+    bool "ZTE AYERS"
+    help
+      Support for ZTE MSM8909 AYERS device.
+
+config BOARD_ELYSEE
+    depends on ARCH_MSM8909
+    bool "ZTE ELYSEE"
+    help
+      Support for ZTE MSM8909 ELYSEE device.
+
+config BOARD_VINUS
+    depends on ARCH_MSM8909
+    bool "ZTE VINUS"
+    help
+      Support for ZTE MSM8909 VINUS device.
+
+config BOARD_NILE
+    depends on ARCH_MSM8909
+    bool "ZTE NILE"
+    help
+      Support for ZTE MSM8909 NILE device.
+
+config BOARD_ELIN
+    depends on ARCH_MSM8909
+    bool "ZTE ELIN"
+    help
+      Support for ZTE MSM8909 ELIN device.
+
+config BOARD_SWEET
+    depends on ARCH_MSM8909
+    bool "ZTE SWEET"
+    help
+      Support for ZTE MSM8909 SWEET device.
+
+config BOARD_LENA
+    depends on ARCH_MSM8909
+    bool "ZTE LENA"
+    help
+      Support for ZTE MSM8909 LENA device.
+
+config BOARD_CASTELLA
+    depends on ARCH_MSM8909
+    bool "ZTE CASTELLA"
+    help
+      Support for ZTE MSM8909 CASTELLA device.
+
+
+config BOARD_LEWIS
+    depends on ARCH_MSM8909
+    bool "ZTE LEWIS"
+    help
+      Support for ZTE MSM8909 LEWIS device.
+
+config BOARD_SPACEX
+    depends on ARCH_MSM8909
+    bool "ZTE SPACEX"
+    help
+      Support for ZTE MSM8909 SPACEX device.
+endmenu
+
 endif

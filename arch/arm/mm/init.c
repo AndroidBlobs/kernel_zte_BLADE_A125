@@ -35,6 +35,7 @@
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
+#include <soc/qcom/vendor/sdlog_mem_reserve.h>
 
 #include "mm.h"
 
@@ -318,6 +319,7 @@ void __init arm_memblock_init(const struct machine_desc *mdesc)
 		mdesc->reserve();
 
 	early_init_fdt_scan_reserved_mem();
+	sdlog_memory_reserve();
 
 	/*
 	 * reserve memory for DMA contigouos allocations,
