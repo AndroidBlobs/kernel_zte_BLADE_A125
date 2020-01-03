@@ -710,6 +710,13 @@ static int msm_dai_q6_auxpcm_set_clk(
 	return rc;
 }
 
+#if defined(CONFIG_SLIC)
+static void msm_dai_q6_auxpcm_shutdown(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai)
+{
+	pr_info("msm_dai_q6_auxpcm_shutdown: for maintain pcm clock\n");
+}
+#else
 static void msm_dai_q6_auxpcm_shutdown(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
@@ -769,6 +776,7 @@ exit:
 	mutex_unlock(&aux_dai_data->rlock);
 	return;
 }
+#endif
 
 static int msm_dai_q6_auxpcm_prepare(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
@@ -808,7 +816,7 @@ static int msm_dai_q6_auxpcm_prepare(struct snd_pcm_substream *substream,
 		goto exit;
 	}
 
-	dev_dbg(dai->dev, "%s: dai->id:%d  opening afe ports\n",
+	dev_info(dai->dev, "%s: dai->id:%d  opening afe ports\n",
 			__func__, dai->id);
 
 	rc = afe_q6_interface_prepare();

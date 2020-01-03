@@ -871,4 +871,7 @@ config SND_SOC_MSM_HDMI_CODEC_RX
 config SND_SOC_MSM_HDMI_DBA_CODEC_RX
 	bool "HDMI DBA Audio Playback"
 	depends on MSM_DBA
+
+config NORTH_AMERCICAN_HEADSET
+	bool "American headset detection"
 endmenu

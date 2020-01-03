@@ -30,19 +30,40 @@
 #include "wcd-mbhc-v2.h"
 #include "wcdcal-hwdep.h"
 
+
+/*
+ * headset detect /proc/hs
+ */
+#include <linux/time.h>
+#include <asm/uaccess.h>
+#include <linux/proc_fs.h>
+
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+extern int	aw_speaker_ampify_rtc_mode_get(void);
+#endif
+
+static int hs_type;
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+#define WCD_MBHC_JACK_MASK (SND_JACK_HEADSET | SND_JACK_OC_HPHL | \
+			   SND_JACK_OC_HPHR | \
+			   SND_JACK_MECHANICAL | SND_JACK_MICROPHONE2 | \
+			   SND_JACK_UNSUPPORTED)
+#else
 #define WCD_MBHC_JACK_MASK (SND_JACK_HEADSET | SND_JACK_OC_HPHL | \
 			   SND_JACK_OC_HPHR | SND_JACK_LINEOUT | \
 			   SND_JACK_MECHANICAL | SND_JACK_MICROPHONE2 | \
 			   SND_JACK_UNSUPPORTED)
+#endif
 
 #define WCD_MBHC_JACK_BUTTON_MASK (SND_JACK_BTN_0 | SND_JACK_BTN_1 | \
-				  SND_JACK_BTN_2 | SND_JACK_BTN_3 | \
-				  SND_JACK_BTN_4 | SND_JACK_BTN_5 | \
-				  SND_JACK_BTN_6 | SND_JACK_BTN_7)
+				  SND_JACK_BTN_2)
+
 #define OCP_ATTEMPT 1
 #define HS_DETECT_PLUG_TIME_MS (3 * 1000)
-#define SPECIAL_HS_DETECT_TIME_MS (2 * 1000)
-#define MBHC_BUTTON_PRESS_THRESHOLD_MIN 250
+
+#define SPECIAL_HS_DETECT_TIME_MS (2 * 150)
+#define MBHC_BUTTON_PRESS_THRESHOLD_MIN 750
+
 #define GND_MIC_SWAP_THRESHOLD 4
 #define WCD_FAKE_REMOVAL_MIN_PERIOD_MS 100
 #define HS_VREF_MIN_VAL 1400
@@ -449,7 +470,11 @@ static void wcd_cancel_hs_detect_plug(struct wcd_mbhc *mbhc,
 	WCD_MBHC_RSC_LOCK(mbhc);
 }
 
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+void wcd_mbhc_clr_and_turnon_hph_padac(struct wcd_mbhc *mbhc)
+#else
 static void wcd_mbhc_clr_and_turnon_hph_padac(struct wcd_mbhc *mbhc)
+#endif
 {
 	bool pa_turned_on = false;
 	u8 wg_time;
@@ -490,6 +515,28 @@ static bool wcd_mbhc_is_hph_pa_on(struct wcd_mbhc *mbhc)
 	return (hph_pa_on) ? true : false;
 }
 
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+void wcd_mbhc_set_and_turnoff_hph_padac(struct wcd_mbhc *mbhc)
+{
+	u8 wg_time;
+
+	WCD_MBHC_REG_READ(WCD_MBHC_HPH_CNP_WG_TIME, wg_time);
+	wg_time += 1;
+	if (aw_speaker_ampify_rtc_mode_get() == 0) {
+		/* If headphone PA is on, check if userspace receives
+		* removal event to sync-up PA's state */
+		if (wcd_mbhc_is_hph_pa_on(mbhc)) {
+			pr_debug("%s PA is on, setting PA_OFF_ACK\n", __func__);
+			set_bit(WCD_MBHC_HPHL_PA_OFF_ACK, &mbhc->hph_pa_dac_state);
+			set_bit(WCD_MBHC_HPHR_PA_OFF_ACK, &mbhc->hph_pa_dac_state);
+		} else {
+			pr_debug("%s PA is off\n", __func__);
+		}
+		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_HPH_PA_EN, 0);
+	}
+	usleep_range(wg_time * 1000, wg_time * 1000 + 50);
+}
+#else
 static void wcd_mbhc_set_and_turnoff_hph_padac(struct wcd_mbhc *mbhc)
 {
 	u8 wg_time;
@@ -510,6 +557,7 @@ static void wcd_mbhc_set_and_turnoff_hph_padac(struct wcd_mbhc *mbhc)
 	usleep_range(wg_time * 1000, wg_time * 1000 + 50);
 }
 
+#endif
 int wcd_mbhc_get_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 			uint32_t *zr)
 {
@@ -692,8 +740,10 @@ static void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 				(mbhc->zr > mbhc->mbhc_cfg->linein_th &&
 				 mbhc->zr < MAX_IMPED) &&
 				(jack_type == SND_JACK_HEADPHONE)) {
+#ifndef CONFIG_NORTH_AMERCICAN_HEADSET
 				jack_type = SND_JACK_LINEOUT;
 				mbhc->current_plug = MBHC_PLUG_TYPE_HIGH_HPH;
+#endif
 				if (mbhc->hph_status) {
 					mbhc->hph_status &= ~(SND_JACK_HEADSET |
 							SND_JACK_LINEOUT |
@@ -717,6 +767,7 @@ static void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 				    WCD_MBHC_JACK_MASK);
 		wcd_mbhc_clr_and_turnon_hph_padac(mbhc);
 	}
+	hs_type = mbhc->current_plug;
 	pr_debug("%s: leave hph_status %x\n", __func__, mbhc->hph_status);
 }
 
@@ -811,7 +862,9 @@ static void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,
 {
 	bool anc_mic_found = false;
 	enum snd_jack_types jack_type;
-
+	
+	struct snd_soc_codec *codec;
+	
 	pr_debug("%s: enter current_plug(%d) new_plug(%d)\n",
 		 __func__, mbhc->current_plug, plug_type);
 
@@ -821,7 +874,9 @@ static void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,
 		pr_debug("%s: cable already reported, exit\n", __func__);
 		goto exit;
 	}
-
+	
+	codec = mbhc->codec;
+	
 	if (plug_type == MBHC_PLUG_TYPE_HEADPHONE) {
 		/*
 		 * Nothing was reported previously
@@ -834,7 +889,30 @@ static void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,
 						SND_JACK_HEADPHONE);
 			if (mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET)
 				wcd_mbhc_report_plug(mbhc, 0, SND_JACK_HEADSET);
-		wcd_mbhc_report_plug(mbhc, 1, SND_JACK_UNSUPPORTED);
+		
+		if (mbhc->impedance_detect) {
+				mbhc->mbhc_cb->compute_impedance(mbhc,
+						&mbhc->zl, &mbhc->zr);
+				pr_err("%s: zte self stick ----zl:%d,zr:%d\n", __func__, mbhc->zl, mbhc->zr);
+				if ((mbhc->zl > 20000) && (mbhc->zr > 20000)) {
+					pr_debug("%s: zte test ----special accessory\n", __func__);
+					/*Toggle switch back*/
+					if (mbhc->mbhc_cfg->swap_gnd_mic &&
+						mbhc->mbhc_cfg->swap_gnd_mic(codec)) {
+						pr_debug("%s:zte US_EU gpio present,flip switch again\n"
+								, __func__);
+					}
+					wcd_mbhc_report_plug(mbhc, 1, SND_JACK_HEADSET);
+				} else {
+#if defined(CONFIG_NORTH_AMERCICAN_HEADSET)
+					wcd_mbhc_report_plug(mbhc, 1, SND_JACK_HEADPHONE);
+#else
+					pr_err("%s: zte headset is SND_JACK_UNSUPPORTED ;100", __func__);
+					wcd_mbhc_report_plug(mbhc, 1, SND_JACK_UNSUPPORTED);
+#endif
+				}
+			}
+		
 	} else if (plug_type == MBHC_PLUG_TYPE_HEADSET) {
 		if (mbhc->mbhc_cfg->enable_anc_mic_detect)
 			anc_mic_found = wcd_mbhc_detect_anc_plug_type(mbhc);
@@ -1094,9 +1172,14 @@ static void wcd_enable_mbhc_supply(struct wcd_mbhc *mbhc,
 							WCD_MBHC_EN_CS);
 		} else if (plug_type == MBHC_PLUG_TYPE_HEADPHONE) {
 			wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_CS);
+		
+		} else if (plug_type == MBHC_PLUG_TYPE_GND_MIC_SWAP) {
+			pr_err("zte modify for selfstick cs mode\n");
+			wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_CS);
 		} else {
 			wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_NONE);
 		}
+		
 	}
 }
 
@@ -1409,6 +1492,13 @@ correct_plug_type:
 			plug_type = MBHC_PLUG_TYPE_HEADSET;
 			goto report;
 		}
+		
+		else{
+			pr_err("%s:zte modify for selfie stick found %d\n", __func__, plug_type);
+			plug_type = MBHC_PLUG_TYPE_HEADSET;
+			goto report;
+		}
+		
 	}
 
 report:
@@ -2106,6 +2196,26 @@ static void wcd_mbhc_moisture_config(struct wcd_mbhc *mbhc)
 				mbhc->mbhc_cfg->moist_cfg.m_iref_ctl);
 }
 
+/*
+ * headset detect /proc/hs
+ */
+static ssize_t hs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+{
+	int ret = 0;
+	char buffer[32] = {0};
+
+	ret = scnprintf(buffer, 32, "%d\n", hs_type);
+
+	ret = simple_read_from_buffer(buf, count, pos, buffer, ret);
+
+	return ret;
+}
+
+static const struct file_operations hs_detect_ops = {
+	.owner    = THIS_MODULE,
+	.read     = hs_read,
+};
+
 static int wcd_mbhc_initialise(struct wcd_mbhc *mbhc)
 {
 	int ret = 0;
@@ -2373,6 +2483,7 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 	int hph_swh = 0;
 	int gnd_swh = 0;
 	struct snd_soc_card *card = codec->component.card;
+	struct proc_dir_entry *proc_hs_type = NULL;
 	const char *hph_switch = "qcom,msm-mbhc-hphl-swh";
 	const char *gnd_switch = "qcom,msm-mbhc-gnd-swh";
 
@@ -2551,6 +2662,11 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 		       mbhc->intr_ids->hph_right_ocp);
 		goto err_hphr_ocp_irq;
 	}
+	proc_hs_type = proc_create("hs", S_IRUGO, NULL, &hs_detect_ops);
+	if (!proc_hs_type)
+		pr_err("%s: hs register failed\n", __func__);
+	else
+		pr_info("%s: hs register success\n", __func__);
 
 	pr_debug("%s: leave ret %d\n", __func__, ret);
 	return ret;
@@ -2594,6 +2710,7 @@ void wcd_mbhc_deinit(struct wcd_mbhc *mbhc)
 	mbhc->mbhc_cb->free_irq(codec, mbhc->intr_ids->hph_right_ocp, mbhc);
 	if (mbhc->mbhc_cb && mbhc->mbhc_cb->register_notifier)
 		mbhc->mbhc_cb->register_notifier(codec, &mbhc->nblock, false);
+	remove_proc_entry("hs", NULL);
 	mutex_destroy(&mbhc->codec_resource_lock);
 }
 EXPORT_SYMBOL(wcd_mbhc_deinit);

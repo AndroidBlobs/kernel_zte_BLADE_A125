@@ -112,6 +112,9 @@ enum {
 
 #define VOLTAGE_CONVERTER(value, min_value, step_size)\
 	((value - min_value)/step_size)
+#if defined(CONFIG_BOARD_ELIN)
+extern int msm8x16_enable_external_spk_pa(int enable);
+#endif
 
 enum {
 	AIF1_PB = 0,
@@ -312,7 +315,15 @@ struct msm8x16_wcd_spmi msm8x16_wcd_modules[MAX_MSM8X16_WCD_DEVICE];
 static void *adsp_state_notifier;
 
 static struct snd_soc_codec *registered_codec;
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+extern void wcd_mbhc_clr_and_turnon_hph_padac(struct wcd_mbhc *mbhc);
+extern void wcd_mbhc_set_and_turnoff_hph_padac(struct wcd_mbhc *mbhc);
+#endif
 
+#if defined(CONFIG_ZTE_2TO1_REC_USE_QUAL)
+extern void enable_rec(void);
+extern void disable_rec(void);
+#endif
 static int get_codec_version(struct msm8x16_wcd_priv *msm8x16_wcd)
 {
 	if (msm8x16_wcd->codec_version == DIANGU)
@@ -2923,6 +2934,11 @@ static const struct soc_enum iir2_inp1_mux_enum =
 static const struct snd_kcontrol_new ext_spk_mux =
 	SOC_DAPM_ENUM("Ext Spk Switch Mux", ext_spk_enum);
 
+#if defined(CONFIG_BOARD_ELIN)
+static const struct snd_kcontrol_new ext_spk_pa_mux =
+	SOC_DAPM_ENUM("Ext Spk PA Switch Mux", ext_spk_enum);
+#endif
+
 static const struct snd_kcontrol_new rx_mix1_inp1_mux =
 	SOC_DAPM_ENUM("RX1 MIX1 INP1 Mux", rx_mix1_inp1_chain_enum);
 
@@ -3347,6 +3363,23 @@ static int msm8x16_wcd_codec_enable_spk_pa(struct snd_soc_dapm_widget *w,
 	}
 	return 0;
 }
+
+#if defined(CONFIG_BOARD_ELIN)
+static int msm8x16_wcd_codec_enable_external_spk_pa(struct snd_soc_dapm_widget *w,
+				     struct snd_kcontrol *kcontrol, int event)
+{
+
+	dev_dbg(w->codec->dev, "%s %d %s\n", __func__, event, w->name);
+	if (SND_SOC_DAPM_EVENT_ON(event)) {
+		usleep_range(CODEC_DELAY_1_MS, CODEC_DELAY_1_1_MS);
+		msm8x16_enable_external_spk_pa(1);
+	} else {
+		msm8x16_enable_external_spk_pa(0);
+		usleep_range(CODEC_DELAY_1_MS, CODEC_DELAY_1_1_MS);
+	}
+	return 0;
+}
+#endif
 
 static int msm8x16_wcd_codec_enable_dig_clk(struct snd_soc_dapm_widget *w,
 				     struct snd_kcontrol *kcontrol, int event)
@@ -4430,6 +4463,11 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"EAR PA", NULL, "HPHR DAC"},
 	{"EAR PA", NULL, "EAR CP"},
 
+#if defined(CONFIG_BOARD_ELIN)
+	{"External Spk PA", NULL, "External Spk PA Switch"},
+	{"External Spk PA Switch", "On", "HEADPHONE"},
+#endif
+
 	/* Headset (RX MIX1 and RX MIX2) */
 	{"HEADPHONE", NULL, "HPHL PA"},
 	{"HEADPHONE", NULL, "HPHR PA"},
@@ -4933,6 +4971,9 @@ static int msm8x16_wcd_codec_enable_spk_ext_pa(struct snd_soc_dapm_widget *w,
 	case SND_SOC_DAPM_POST_PMU:
 		dev_dbg(w->codec->dev,
 			"%s: enable external speaker PA\n", __func__);
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+		wcd_mbhc_clr_and_turnon_hph_padac(&msm8x16_wcd->mbhc);
+#endif
 		if (msm8x16_wcd->codec_spk_ext_pa_cb)
 			msm8x16_wcd->codec_spk_ext_pa_cb(codec, 1);
 		break;
@@ -4941,6 +4982,11 @@ static int msm8x16_wcd_codec_enable_spk_ext_pa(struct snd_soc_dapm_widget *w,
 			"%s: enable external speaker PA\n", __func__);
 		if (msm8x16_wcd->codec_spk_ext_pa_cb)
 			msm8x16_wcd->codec_spk_ext_pa_cb(codec, 0);
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+	if ((&msm8x16_wcd->mbhc)->current_plug == MBHC_PLUG_TYPE_NONE) {
+		wcd_mbhc_set_and_turnoff_hph_padac(&msm8x16_wcd->mbhc);
+	}
+#endif
 		break;
 	}
 	return 0;
@@ -4980,6 +5026,9 @@ static int msm8x16_wcd_codec_enable_ear_pa(struct snd_soc_dapm_widget *w,
 		usleep_range(7000, 7100);
 		snd_soc_update_bits(codec,
 			MSM8X16_WCD_A_CDC_RX1_B6_CTL, 0x01, 0x00);
+#if defined(CONFIG_ZTE_2TO1_REC_USE_QUAL)
+		enable_rec();
+#endif
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		snd_soc_update_bits(codec,
@@ -4998,6 +5047,9 @@ static int msm8x16_wcd_codec_enable_ear_pa(struct snd_soc_dapm_widget *w,
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_ANALOG_RX_HPH_R_TEST, 0x04, 0x0);
 		}
+#if defined(CONFIG_ZTE_2TO1_REC_USE_QUAL)
+		disable_rec();
+#endif
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		dev_dbg(w->codec->dev,
@@ -5097,6 +5149,9 @@ static const struct snd_soc_dapm_widget msm8x16_wcd_dapm_widgets[] = {
 			6, 0 , NULL, 0, msm8x16_wcd_codec_enable_spk_pa,
 			SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
 			SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD),
+#if defined(CONFIG_BOARD_ELIN)
+	SND_SOC_DAPM_SPK("External Spk PA", msm8x16_wcd_codec_enable_external_spk_pa),
+#endif
 
 	SND_SOC_DAPM_PGA_E("LINEOUT PA", MSM8X16_WCD_A_ANALOG_RX_LO_EN_CTL,
 			5, 0 , NULL, 0, msm8x16_wcd_codec_enable_lo_pa,
@@ -5108,6 +5163,10 @@ static const struct snd_soc_dapm_widget msm8x16_wcd_dapm_widgets[] = {
 
 	SND_SOC_DAPM_MUX("Ext Spk Switch", SND_SOC_NOPM, 0, 0,
 		&ext_spk_mux),
+#if defined(CONFIG_BOARD_ELIN)
+	SND_SOC_DAPM_MUX("External Spk PA Switch", SND_SOC_NOPM, 0, 0,
+		&ext_spk_pa_mux),
+#endif
 
 	SND_SOC_DAPM_MIXER("RX1 MIX1", SND_SOC_NOPM, 0, 0, NULL, 0),
 	SND_SOC_DAPM_MIXER("RX2 MIX1", SND_SOC_NOPM, 0, 0, NULL, 0),

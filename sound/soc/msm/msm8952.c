@@ -69,6 +69,9 @@ static int mi2s_rx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
 static int mi2s_rx_bits_per_sample = 16;
 static int mi2s_rx_sample_rate = SAMPLING_RATE_48KHZ;
 
+static int ext_spk_boost_enable;
+static int ext_spk_boost_gpio = -1;
+
 static atomic_t quat_mi2s_clk_ref;
 static atomic_t quin_mi2s_clk_ref;
 static atomic_t auxpcm_mi2s_clk_ref;
@@ -77,9 +80,34 @@ static int msm8952_enable_dig_cdc_clk(struct snd_soc_codec *codec, int enable,
 					bool dapm);
 static bool msm8952_swap_gnd_mic(struct snd_soc_codec *codec);
 static int msm8952_mclk_event(struct snd_soc_dapm_widget *w,
-			      struct snd_kcontrol *kcontrol, int event);
+						struct snd_kcontrol *kcontrol, int event);
 static int msm8952_wsa_switch_event(struct snd_soc_dapm_widget *w,
-			      struct snd_kcontrol *kcontrol, int event);
+						struct snd_kcontrol *kcontrol, int event);
+#if defined(CONFIG_BOARD_ELIN)
+static int spk_hs_swtich_status;
+static int ext_spk_pa_gpio = -1;
+static int ext_spk_hs_switch_gpio = -1;
+#endif
+
+
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+static int spk_mode_gpio = -1;
+static int spk_mode = 0;
+
+static struct mutex cdc_spk_mutex;
+	#define	MODE0 0
+	#define	MODE1 1
+	#define MODE2 2
+	#define MODE3 3
+	#define MODE4 4
+	#define MODE8 8
+#endif
+
+#if defined(CONFIG_ZTE_2TO1_REC_USE_QUAL)
+static int rec_mode_gpio = -1;
+static int rec_mode = 0;
+static struct mutex cdc_rec_mutex;
+#endif
 
 /*
  * Android L spec
@@ -94,9 +122,11 @@ static struct wcd_mbhc_config mbhc_cfg = {
 	.swap_gnd_mic = NULL,
 	.hs_ext_micbias = false,
 	.key_code[0] = KEY_MEDIA,
-	.key_code[1] = KEY_VOICECOMMAND,
-	.key_code[2] = KEY_VOLUMEUP,
-	.key_code[3] = KEY_VOLUMEDOWN,
+	 
+	.key_code[1] = KEY_VOLUMEUP,
+	.key_code[2] = KEY_VOLUMEDOWN,
+	.key_code[3] = KEY_VOICECOMMAND,
+	 
 	.key_code[4] = 0,
 	.key_code[5] = 0,
 	.key_code[6] = 0,
@@ -171,6 +201,10 @@ static const char *const proxy_rx_ch_text[] = {"One", "Two", "Three", "Four",
 static const char *const vi_feed_ch_text[] = {"One", "Two"};
 static char const *mi2s_rx_sample_rate_text[] = {"KHZ_48",
 					"KHZ_96", "KHZ_192"};
+static const char *const ext_spk_boost_text[] = {"Off", "On"};
+#if defined(CONFIG_BOARD_ELIN)
+static const char *const spk_headset_switch[] = {"Spk", "Hs"};
+#endif
 
 static inline int param_is_mask(int p)
 {
@@ -260,6 +294,64 @@ int is_ext_spk_gpio_support(struct platform_device *pdev,
 	return 0;
 }
 
+
+
+#if defined(CONFIG_ZTE_2TO1_REC_USE_QUAL)
+void enable_rec(void)
+{
+	mutex_lock(&cdc_rec_mutex);
+	if (gpio_is_valid(rec_mode_gpio)) {
+		mdelay(5);
+		gpio_set_value(rec_mode_gpio, 1);
+	}
+	mutex_unlock(&cdc_rec_mutex);
+}
+void disable_rec(void)
+{
+	mutex_lock(&cdc_rec_mutex);
+	if (gpio_is_valid(rec_mode_gpio)) {
+		gpio_set_value(rec_mode_gpio, 0);
+		mdelay(5);
+	}
+	mutex_unlock(&cdc_rec_mutex);
+}
+#endif
+
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
+{
+	if (enable == 1) {
+		pr_debug("%s: speaker_mode = %d\n", __func__, spk_mode);
+			mutex_lock(&cdc_spk_mutex);
+		 if (gpio_is_valid(spk_mode_gpio)) {
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1000);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+		 }
+		 mutex_unlock(&cdc_spk_mutex);
+		 spk_mode = 3;
+		pr_debug("%s: speaker_mode = %d\n", __func__, spk_mode);
+	} else {
+		if (gpio_is_valid(spk_mode_gpio)) {
+			gpio_set_value(spk_mode_gpio, 0);
+	}
+	udelay(1000);
+	spk_mode = 0;
+	pr_debug("%s: speaker_mode = %d\n", __func__, spk_mode);
+	msleep(100);
+}
+	return 0;
+}
+#else
+
 static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
 {
 	struct snd_soc_card *card = codec->component.card;
@@ -294,6 +386,8 @@ static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
 	}
 	return 0;
 }
+#endif
+
 
 /* Validate whether US EU switch is present or not */
 int is_us_eu_switch_gpio_support(struct platform_device *pdev,
@@ -347,14 +441,37 @@ static int msm_proxy_rx_ch_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int ext_spk_boost_get(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s:ext_spk_boost_get ext_spk_boost_enable(%d)\n",
+			 __func__, ext_spk_boost_enable);
+	ucontrol->value.integer.value[0] = ext_spk_boost_enable;
+	return 0;
+}
+
+static int ext_spk_boost_put(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s:ext_spk_boost_put ext_spk_boost_enable(%d), put val(%ld)\n",
+			 __func__, ext_spk_boost_enable, ucontrol->value.integer.value[0]);
+	if (ext_spk_boost_enable == ucontrol->value.integer.value[0])
+		return 0;
+
+	ext_spk_boost_enable = ucontrol->value.integer.value[0];
+	gpio_direction_output(ext_spk_boost_gpio, ext_spk_boost_enable);
+
+	return 1;
+}
+
 static int msm_auxpcm_be_params_fixup(struct snd_soc_pcm_runtime *rtd,
 					struct snd_pcm_hw_params *params)
 {
 	struct snd_interval *rate =
-	    hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
+			hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
 
 	struct snd_interval *channels =
-	    hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
+			hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
 
 	rate->min = rate->max = msm8952_auxpcm_rate;
 	channels->min = channels->max = 1;
@@ -471,16 +588,16 @@ static int msm_proxy_tx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 }
 
 static int msm_mi2s_snd_hw_params(struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *params)
+					 struct snd_pcm_hw_params *params)
 {
 	pr_debug("%s(): substream = %s  stream = %d\n", __func__,
 		 substream->name, substream->stream);
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
-			       mi2s_rx_bit_format);
+						 mi2s_rx_bit_format);
 	else
 		param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
-			       SNDRV_PCM_FORMAT_S16_LE);
+						 SNDRV_PCM_FORMAT_S16_LE);
 	return 0;
 }
 
@@ -659,8 +776,8 @@ static int msm8952_enable_dig_cdc_clk(struct snd_soc_codec *codec,
 
 	pdata = snd_soc_card_get_drvdata(codec->component.card);
 	pr_debug("%s: enable %d mclk ref counter %d\n",
-		   __func__, enable,
-		   atomic_read(&pdata->mclk_rsc_ref));
+			 __func__, enable,
+			 atomic_read(&pdata->mclk_rsc_ref));
 	if (enable) {
 		if (!atomic_read(&pdata->mclk_rsc_ref)) {
 			cancel_delayed_work_sync(
@@ -789,6 +906,156 @@ static int mi2s_rx_bit_format_put(struct snd_kcontrol *kcontrol,
 	}
 	return 0;
 }
+
+
+#if defined(CONFIG_ZTE_USE_AMP_AW87316)
+static const char * const msm8x16_wcd_spk_mode_ctrl_text[] = {
+		 "ZERO", "MODE1", "MODE2", "MODE3", "MODE4", "MODE5", "MODE6", "MODE7", "MODE8",};
+static const struct soc_enum msm8x16_wcd_spk_mode_ctl_enum[] = {
+		SOC_ENUM_SINGLE_EXT(9, msm8x16_wcd_spk_mode_ctrl_text),
+};
+
+int	aw_speaker_ampify_rtc_mode_get(void)
+{
+	 return spk_mode;
+}
+
+static int msm8x16_wcd_speaker_mode_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s: speaker_mode = %d\n", __func__, spk_mode);
+	ucontrol->value.integer.value[0] = spk_mode;
+	return 0;
+}
+
+static int msm8x16_wcd_speaker_mode_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s: ucontrol->value.integer.value[0] = %ld\n",
+		__func__, ucontrol->value.integer.value[0]);
+
+	switch (ucontrol->value.integer.value[0]) {
+	case MODE0:
+		 if (gpio_is_valid(spk_mode_gpio)) {
+			gpio_set_value(spk_mode_gpio, 0);
+		 }
+		udelay(1000);
+		spk_mode = 0;
+		pr_err("%s: speaker_mode = %d\n", __func__, spk_mode);
+		break;
+	case MODE1:
+			mutex_lock(&cdc_spk_mutex);
+		 if (gpio_is_valid(spk_mode_gpio)) {
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1000);
+			gpio_set_value(spk_mode_gpio, 1);
+		 }
+		 mutex_unlock(&cdc_spk_mutex);
+		 spk_mode = 1;
+		pr_err("%s: speaker_mode = %d\n", __func__, spk_mode);
+		break;
+	case MODE2:
+			mutex_lock(&cdc_spk_mutex);
+		 if (gpio_is_valid(spk_mode_gpio)) {
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1000);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+		 }
+		 mutex_unlock(&cdc_spk_mutex);
+		 spk_mode = 2;
+		pr_err("%s: speaker_mode = %d\n", __func__, spk_mode);
+		break;
+	case MODE3:
+			mutex_lock(&cdc_spk_mutex);
+		 if (gpio_is_valid(spk_mode_gpio)) {
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1000);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+		 }
+		 mutex_unlock(&cdc_spk_mutex);
+		 spk_mode = 3;
+		pr_err("%s: speaker_mode = %d\n", __func__, spk_mode);
+		break;
+	case MODE4:
+			mutex_lock(&cdc_spk_mutex);
+		 if (gpio_is_valid(spk_mode_gpio)) {
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1000);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+		 }
+		 mutex_unlock(&cdc_spk_mutex);
+		 spk_mode = 4;
+		pr_err("%s: speaker_mode = %d\n", __func__, spk_mode);
+		break;
+	case MODE8:
+			mutex_lock(&cdc_spk_mutex);
+		 if (gpio_is_valid(spk_mode_gpio)) {
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1000);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 0);
+			udelay(1);
+			gpio_set_value(spk_mode_gpio, 1);
+		 }
+		 mutex_unlock(&cdc_spk_mutex);
+		 spk_mode = 8;
+		pr_err("%s: speaker_mode = %d\n", __func__, spk_mode);
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+#endif
 
 static int loopback_mclk_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -931,7 +1198,7 @@ static int mi2s_rx_sample_rate_get(struct snd_kcontrol *kcontrol,
 }
 
 static int mi2s_rx_sample_rate_put(struct snd_kcontrol *kcontrol,
-				    struct snd_ctl_elem_value *ucontrol)
+						struct snd_ctl_elem_value *ucontrol)
 {
 	switch (ucontrol->value.integer.value[0]) {
 	case 1:
@@ -987,6 +1254,49 @@ static int msm_vi_feed_tx_ch_put(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
+#if defined(CONFIG_BOARD_ELIN)
+static int spk_hs_switch_get(struct snd_kcontrol *kcontrol,
+		       struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s:spk_hs_switch_get spk_hs_swtich_status(%d)\n",
+			 __func__, spk_hs_swtich_status);
+	ucontrol->value.integer.value[0] = spk_hs_swtich_status;
+	return 0;
+}
+
+static int spk_hs_switch_put(struct snd_kcontrol *kcontrol,
+		       struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s:spk_hs_switch_put spk_hs_swtich_status(%d), put val(%ld)\n",
+			 __func__, spk_hs_swtich_status, ucontrol->value.integer.value[0]);
+	if (spk_hs_swtich_status == ucontrol->value.integer.value[0])
+		return 0;
+
+	spk_hs_swtich_status = ucontrol->value.integer.value[0];
+	gpio_direction_output(ext_spk_hs_switch_gpio, spk_hs_swtich_status);
+
+	return 1;
+}
+
+int msm8x16_enable_external_spk_pa(int enable)
+{
+	u8 i = 0;
+
+	pr_debug("%s:ext_spk_pa_get ext_spk_pa_enable(%d)\n",
+			 __func__, enable);
+	if (enable) {
+		for (i = 0; i < 8; i++) {
+			gpio_direction_output(ext_spk_pa_gpio, (i%2) ? 0 : 1);
+			udelay(2);
+		}
+	}
+
+	gpio_direction_output(ext_spk_pa_gpio, enable);
+	return 1;
+}
+EXPORT_SYMBOL(msm8x16_enable_external_spk_pa);
+#endif
+
 static const struct soc_enum msm_snd_enum[] = {
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(rx_bit_format_text),
 				rx_bit_format_text),
@@ -1002,9 +1312,19 @@ static const struct soc_enum msm_snd_enum[] = {
 				vi_feed_ch_text),
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(mi2s_rx_sample_rate_text),
 				mi2s_rx_sample_rate_text),
+	SOC_ENUM_SINGLE_EXT(2, ext_spk_boost_text),
+#if defined(CONFIG_BOARD_ELIN)
+	SOC_ENUM_SINGLE_EXT(2, spk_headset_switch),
+#endif
 };
 
 static const struct snd_kcontrol_new msm_snd_controls[] = {
+
+#ifdef CONFIG_ZTE_USE_AMP_AW87316
+	SOC_ENUM_EXT("Speaker mode", msm8x16_wcd_spk_mode_ctl_enum[0],
+		msm8x16_wcd_speaker_mode_get, msm8x16_wcd_speaker_mode_put),
+#endif
+
 	SOC_ENUM_EXT("MI2S_RX Format", msm_snd_enum[0],
 			mi2s_rx_bit_format_get, mi2s_rx_bit_format_put),
 	SOC_ENUM_EXT("MI2S_TX Channels", msm_snd_enum[1],
@@ -1014,17 +1334,23 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 	SOC_ENUM_EXT("Loopback MCLK", msm_snd_enum[2],
 			loopback_mclk_get, loopback_mclk_put),
 	SOC_ENUM_EXT("Internal BTSCO SampleRate", msm_snd_enum[3],
-		     msm_btsco_rate_get, msm_btsco_rate_put),
+				 msm_btsco_rate_get, msm_btsco_rate_put),
 	SOC_ENUM_EXT("PROXY_RX Channels", msm_snd_enum[4],
 			msm_proxy_rx_ch_get, msm_proxy_rx_ch_put),
 	SOC_ENUM_EXT("VI_FEED_TX Channels", msm_snd_enum[5],
 			msm_vi_feed_tx_ch_get, msm_vi_feed_tx_ch_put),
 	SOC_ENUM_EXT("MI2S_RX SampleRate", msm_snd_enum[6],
 			mi2s_rx_sample_rate_get, mi2s_rx_sample_rate_put),
+	SOC_ENUM_EXT("External Spk Boost", msm_snd_enum[7],
+			ext_spk_boost_get, ext_spk_boost_put),
+#if defined(CONFIG_BOARD_ELIN)
+	SOC_ENUM_EXT("Spk Headset Switch", msm_snd_enum[8],
+			spk_hs_switch_get, spk_hs_switch_put),
+#endif
 };
 
 static int msm8952_mclk_event(struct snd_soc_dapm_widget *w,
-			      struct snd_kcontrol *kcontrol, int event)
+						struct snd_kcontrol *kcontrol, int event)
 {
 	struct msm8916_asoc_mach_data *pdata = NULL;
 	int ret = 0;
@@ -1056,7 +1382,7 @@ static int msm8952_mclk_event(struct snd_soc_dapm_widget *w,
 }
 
 static int msm8952_wsa_switch_event(struct snd_soc_dapm_widget *w,
-			      struct snd_kcontrol *kcontrol, int event)
+						struct snd_kcontrol *kcontrol, int event)
 {
 	int ret = 0;
 	struct msm8916_asoc_mach_data *pdata = NULL;
@@ -1293,10 +1619,14 @@ static int msm_prim_auxpcm_startup(struct snd_pcm_substream *substream)
 
 static void msm_prim_auxpcm_shutdown(struct snd_pcm_substream *substream)
 {
+	#if !defined(CONFIG_SLIC)
 	int ret;
+	#endif
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_card *card = rtd->card;
+	#if !defined(CONFIG_SLIC)
 	struct snd_soc_codec *codec = rtd->codec;
+	#endif
 	struct msm8916_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
 
 	pr_debug("%s(): substream = %s\n",
@@ -1308,6 +1638,7 @@ static void msm_prim_auxpcm_shutdown(struct snd_pcm_substream *substream)
 	}
 	if (atomic_read(&auxpcm_mi2s_clk_ref) > 0)
 		atomic_dec(&auxpcm_mi2s_clk_ref);
+	#if !defined(CONFIG_SLIC)
 	if ((atomic_read(&auxpcm_mi2s_clk_ref) == 0) &&
 		(atomic_read(&pdata->mclk_rsc_ref) == 0)) {
 		msm8952_enable_dig_cdc_clk(codec, 0, true);
@@ -1316,6 +1647,7 @@ static void msm_prim_auxpcm_shutdown(struct snd_pcm_substream *substream)
 	if (ret < 0)
 		pr_err("%s(): configure gpios failed = %s\n",
 				__func__, "quat_i2s");
+	#endif
 }
 
 static int msm_sec_mi2s_snd_startup(struct snd_pcm_substream *substream)
@@ -1545,7 +1877,7 @@ static void *def_msm8952_wcd_mbhc_cal(void)
 		return NULL;
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(msm8952_wcd_cal)->X) = (Y))
-	S(v_hs_max, 1500);
+	S(v_hs_max, 1600);
 #undef S
 #define S(X, Y) ((WCD_MBHC_CAL_BTN_DET_PTR(msm8952_wcd_cal)->X) = (Y))
 	S(num_btn, WCD_MBHC_DEF_BUTTONS);
@@ -1568,17 +1900,30 @@ static void *def_msm8952_wcd_mbhc_cal(void)
 	 * 210-290 == Button 2
 	 * 360-680 == Button 3
 	 */
+	 
 	btn_low[0] = 75;
 	btn_high[0] = 75;
-	btn_low[1] = 150;
-	btn_high[1] = 150;
-	btn_low[2] = 225;
-	btn_high[2] = 225;
-	btn_low[3] = 450;
-	btn_high[3] = 450;
-	btn_low[4] = 500;
-	btn_high[4] = 500;
+#if defined(CONFIG_NORTH_AMERCICAN_HEADSET)
+	btn_low[1] = 200;
+	btn_high[1] = 200;
+	btn_low[2] = 450;
+	btn_high[2] = 450;
+	btn_low[3] = 600;
+	btn_high[3] = 600;
+	btn_low[4] = 762;
+	btn_high[4] = 762;
 
+#else
+	btn_low[1] = 225;
+	btn_high[1] = 237.5;
+	btn_low[2] = 400;
+	btn_high[2] = 412.5;
+	btn_low[3] = 500;
+	btn_high[3] = 587.5;
+	btn_low[4] = 600;
+	btn_high[4] = 762.5;
+#endif
+	 
 	return msm8952_wcd_cal;
 }
 
@@ -1605,6 +1950,9 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 
 	snd_soc_dapm_ignore_suspend(dapm, "EAR");
 	snd_soc_dapm_ignore_suspend(dapm, "HEADPHONE");
+#if defined(CONFIG_BOARD_ELIN)
+	snd_soc_dapm_ignore_suspend(dapm, "External Spk PA");
+#endif
 	snd_soc_dapm_ignore_suspend(dapm, "SPK_OUT");
 	snd_soc_dapm_ignore_suspend(dapm, "AMIC1");
 	snd_soc_dapm_ignore_suspend(dapm, "AMIC2");
@@ -3208,6 +3556,74 @@ parse_mclk_freq:
 		pr_err("%s:  doesn't support external speaker pa\n",
 				__func__);
 
+	ext_spk_boost_gpio = of_get_named_gpio(pdev->dev.of_node,
+				"qcom,msm-spk-ext-boost", 0);
+	if (ext_spk_boost_gpio < 0) {
+		dev_dbg(&pdev->dev,
+			"%s: missing msm-spk-ext-boost in dt node\n", __func__);
+	} else {
+		if (!gpio_is_valid(ext_spk_boost_gpio)) {
+			pr_err("%s: Invalid external speaker gpio: %d",
+				__func__, ext_spk_boost_gpio);
+			return -EINVAL;
+		}
+		gpio_free(ext_spk_boost_gpio);
+
+		ret = gpio_request(ext_spk_boost_gpio, "ext_spk_boost_gpio");
+		if (ret) {
+			pr_err("%s: gpio_request failed for ext_spk_boost_gpio.\n",
+				__func__);
+			return -EINVAL;
+		}
+		gpio_direction_output(ext_spk_boost_gpio, 1);
+	}
+
+#if defined(CONFIG_BOARD_ELIN)
+	ext_spk_pa_gpio = of_get_named_gpio(pdev->dev.of_node,
+				"qcom,msm-spk-pa", 0);
+	if (ext_spk_pa_gpio < 0) {
+		dev_dbg(&pdev->dev,
+			"%s: missing msm-spk-pa in dt node\n", __func__);
+	} else {
+		if (!gpio_is_valid(ext_spk_pa_gpio)) {
+			pr_err("%s: Invalid external speaker pa gpio: %d",
+				__func__, ext_spk_pa_gpio);
+			return -EINVAL;
+		}
+		gpio_free(ext_spk_pa_gpio);
+
+		ret = gpio_request(ext_spk_pa_gpio, "ext_spk_pa");
+		if (ret) {
+			pr_err("%s: gpio_request failed for ext_spk_pa_gpio.\n",
+				__func__);
+			return -EINVAL;
+		}
+		gpio_direction_output(ext_spk_pa_gpio, 0);
+	}
+
+	ext_spk_hs_switch_gpio = of_get_named_gpio(pdev->dev.of_node,
+				"qcom,msm-spk-hs-switch", 0);
+	if (ext_spk_hs_switch_gpio < 0) {
+		dev_dbg(&pdev->dev,
+			"%s: missing msm-spk-hs-switch in dt node\n", __func__);
+	} else {
+		if (!gpio_is_valid(ext_spk_hs_switch_gpio)) {
+			pr_err("%s: Invalid spk hs switch gpio: %d",
+				__func__, ext_spk_hs_switch_gpio);
+			return -EINVAL;
+		}
+		gpio_free(ext_spk_hs_switch_gpio);
+
+		ret = gpio_request(ext_spk_hs_switch_gpio, "ext_spk_hs_switch_gpio");
+		if (ret) {
+			pr_err("%s: gpio_request failed for ext_spk_hs_switch_gpio.\n",
+				__func__);
+			return -EINVAL;
+		}
+		gpio_direction_output(ext_spk_hs_switch_gpio, 0);
+	}
+#endif
+
 	ret = of_property_read_string(pdev->dev.of_node,
 		hs_micbias_type, &type);
 	if (ret) {
@@ -3224,7 +3640,7 @@ parse_mclk_freq:
 	}
 
 	ret = of_property_read_u32(pdev->dev.of_node,
-				  "qcom,msm-afe-clk-ver", &val);
+					"qcom,msm-afe-clk-ver", &val);
 	if (ret)
 		pdata->afe_clk_ver = AFE_CLK_VERSION_V2;
 	else
@@ -3272,6 +3688,15 @@ parse_mclk_freq:
 	atomic_set(&quin_mi2s_clk_ref, 0);
 	atomic_set(&auxpcm_mi2s_clk_ref, 0);
 
+#ifdef CONFIG_ZTE_USE_AMP_AW87316
+	mutex_init(&cdc_spk_mutex);
+#endif
+
+
+#ifdef CONFIG_ZTE_2TO1_REC_USE_QUAL
+	mutex_init(&cdc_rec_mutex);
+#endif
+
 	ret = snd_soc_of_parse_audio_routing(card,
 			"qcom,audio-routing");
 	if (ret)
@@ -3289,7 +3714,92 @@ parse_mclk_freq:
 			ret);
 		goto err;
 	}
+
+#ifdef CONFIG_ZTE_USE_AMP_AW87316
+	if (spk_mode_gpio < 0) {
+		spk_mode_gpio = of_get_named_gpio(pdev->dev.of_node,
+			"zte,speaker-mode-switch-gpios", 0);
+		if (spk_mode_gpio < 0) {
+			dev_err(&pdev->dev,
+					"Looking up %s property in node %s failed %d\n",
+					"zte,speaker-mode-switch-gpios",
+					pdev->dev.of_node->full_name, spk_mode_gpio);
+		} else {
+			ret = gpio_request(spk_mode_gpio,
+					"ZTE_SPEAKER_MODE");
+			if (ret) {
+				/* GPIO to enable speaker mode exists, but failed request */
+				dev_err(&pdev->dev,
+						"%s: Failed to request speaker gpio %d\n",
+						__func__, spk_mode_gpio);
+				goto err_spkr_mode;
+			}
+			dev_err(&pdev->dev,
+					"%s: success to request speaker gpio %d\n",
+					__func__, spk_mode_gpio);
+		}
+	}
+	if (gpio_is_valid(spk_mode_gpio)) {
+		gpio_direction_output(spk_mode_gpio, 0);
+	}
+		 spk_mode = 0;
+#endif
+
+
+	gpio_direction_output(ext_spk_boost_gpio, 0);
+
+
+#ifdef CONFIG_ZTE_2TO1_REC_USE_QUAL
+if (rec_mode_gpio < 0) {
+	rec_mode_gpio = of_get_named_gpio(pdev->dev.of_node,
+			"zte,receiver-mode-switch-gpios", 0);
+	if (rec_mode_gpio < 0) {
+		dev_err(&pdev->dev,
+			"Looking up %s property in node %s failed %d\n",
+			"zte,receiver-mode-switch-gpios",
+			pdev->dev.of_node->full_name, rec_mode_gpio);
+	} else {
+		ret = gpio_request(rec_mode_gpio,
+				"ZTE_RECEIVER_MODE");
+		if (ret) {
+			/* GPIO to enable speaker mode exists, but failed request */
+			dev_err(&pdev->dev,
+				"%s: Failed to request receiver gpio %d\n",
+				__func__, rec_mode_gpio);
+			goto err_rec_mode;
+		}
+		dev_err(&pdev->dev,
+				"%s: success to request receiver gpio %d\n",
+				__func__, rec_mode_gpio);
+	}
+}
+		 if (gpio_is_valid(rec_mode_gpio)) {
+			gpio_direction_output(rec_mode_gpio, 0);
+		 }
+		 rec_mode = 0;
+#endif
+
+
+	dev_err(&pdev->dev, "zte add register card sound success\n");
+
 	return 0;
+
+#ifdef CONFIG_ZTE_2TO1_REC_USE_QUAL
+err_rec_mode:
+	if (rec_mode_gpio >= 0) {
+		gpio_free(rec_mode_gpio);
+		rec_mode_gpio = -1;
+	}
+#endif
+
+#ifdef CONFIG_ZTE_USE_AMP_AW87316
+err_spkr_mode:
+	if (spk_mode_gpio >= 0) {
+		gpio_free(spk_mode_gpio);
+		spk_mode_gpio = -1;
+	}
+#endif
+
 err:
 	if (pdata->vaddr_gpio_mux_spkr_ctl)
 		iounmap(pdata->vaddr_gpio_mux_spkr_ctl);
@@ -3333,6 +3843,14 @@ static int msm8952_asoc_machine_remove(struct platform_device *pdev)
 		}
 		mutex_destroy(&pdata->wsa_mclk_mutex);
 	}
+	if (gpio_is_valid(ext_spk_boost_gpio))
+		gpio_free(ext_spk_boost_gpio);
+#if defined(CONFIG_BOARD_ELIN)
+	if (gpio_is_valid(ext_spk_pa_gpio))
+		gpio_free(ext_spk_pa_gpio);
+	if (gpio_is_valid(ext_spk_hs_switch_gpio))
+		gpio_free(ext_spk_hs_switch_gpio);
+#endif
 	snd_soc_unregister_card(card);
 	mutex_destroy(&pdata->cdc_mclk_mutex);
 	return 0;
