@@ -54,7 +54,7 @@ static void __activate_col(const struct matrix_keypad_platform_data *pdata,
 	if (on) {
 		gpio_direction_output(pdata->col_gpios[col], level_on);
 	} else {
-		gpio_set_value_cansleep(pdata->col_gpios[col], !level_on);
+		/*gpio_set_value_cansleep(pdata->col_gpios[col], !level_on);*/
 		gpio_direction_input(pdata->col_gpios[col]);
 	}
 }
@@ -89,11 +89,14 @@ static void enable_row_irqs(struct matrix_keypad *keypad)
 	const struct matrix_keypad_platform_data *pdata = keypad->pdata;
 	int i;
 
-	if (pdata->clustered_irq > 0)
+	if (pdata->clustered_irq > 0) {
 		enable_irq(pdata->clustered_irq);
-	else {
-		for (i = 0; i < pdata->num_row_gpios; i++)
+		enable_irq_wake(pdata->clustered_irq);
+	} else {
+		for (i = 0; i < pdata->num_row_gpios; i++) {
 			enable_irq(gpio_to_irq(pdata->row_gpios[i]));
+			enable_irq_wake(gpio_to_irq(pdata->row_gpios[i]));
+		}
 	}
 }
 
@@ -125,7 +128,7 @@ static void matrix_keypad_scan(struct work_struct *work)
 
 	/* de-activate all columns for scanning */
 	activate_all_cols(pdata, false);
-
+	udelay(100);
 	memset(new_state, 0, sizeof(new_state));
 
 	/* assert each column and read the row status out */
@@ -138,6 +141,7 @@ static void matrix_keypad_scan(struct work_struct *work)
 				row_asserted(pdata, row) ? (1 << row) : 0;
 
 		activate_col(pdata, col, false);
+		udelay(50);
 	}
 
 	for (col = 0; col < pdata->num_col_gpios; col++) {

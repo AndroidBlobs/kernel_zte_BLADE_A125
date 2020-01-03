@@ -1440,7 +1440,7 @@ static const struct interrupt_map_t int_map[] = {
 
 /* Polling delay in msecs */
 #define POLL_INTERVAL_MIN_MS	10
-#define POLL_INTERVAL_MAX_MS	4000
+#define POLL_INTERVAL_MAX_MS	1000/*4000*/
 #define POLL_DEFAULT_INTERVAL_MS 200
 
 #define POLL_MS_100HZ 10
@@ -1451,6 +1451,18 @@ static const struct interrupt_map_t int_map[] = {
 #define MAX_RANGE_MAP	4
 
 #define BMA_CAL_BUF_SIZE	99
+
+/*! BMA2x2 calibrate definition*/
+#define BMA2X2_CAL_USING_SNS_CLASS
+#ifdef BMA2X2_CAL_USING_SNS_CLASS
+#define BMA2X2_CAL_SKIP_CNT		(2)
+#define BMA2X2_CAL_MAX			(10 + BMA2X2_CAL_SKIP_CNT)
+#define RAW_TO_1G				(16384)
+#define BMA2X2_CAL_DELAY		(60) /*ms*/
+#define BMA2X2_X_AXIS_THRESHOLD	(0.2 * RAW_TO_1G)
+#define BMA2X2_Y_AXIS_THRESHOLD	(0.2 * RAW_TO_1G)
+#define BMA2X2_Z_AXIS_THRESHOLD	(0.25 * RAW_TO_1G)
+#endif
 
 struct bma2x2_type_map_t {
 
@@ -1549,6 +1561,10 @@ struct bma2x2_data {
 	atomic_t fifo_enabled;
 	atomic_t en_sig_motion;
 	char calibrate_buf[BMA_CAL_BUF_SIZE];
+#ifdef BMA2X2_CAL_USING_SNS_CLASS
+	bool use_cal;
+	int cal_params[3];
+#endif
 	unsigned int chip_id;
 	unsigned int chip_type;
 	unsigned char mode;
@@ -1635,7 +1651,9 @@ static int bma2x2_normal_to_suspend(struct bma2x2_data *bma2x2,
 static int bma2x2_store_state(struct i2c_client *client,
 			struct bma2x2_data *data);
 static int bma2x2_power_ctl(struct bma2x2_data *data, bool on);
+#ifndef BMA2X2_CAL_USING_SNS_CLASS
 static int bma2x2_eeprom_prog(struct i2c_client *client);
+#endif
 static int bma2x2_get_sensitivity(struct bma2x2_data *bma2x2, int range);
 static void bma2x2_pinctrl_state(struct bma2x2_data *data, bool active);
 static int bma2x2_flush_fifo(struct bma2x2_data *bma2x2);
@@ -5275,6 +5293,14 @@ static int bma2x2_read_accel_xyz(struct i2c_client *client,
 	BMA2X2_SHIFT_BITWIDTH(acc->z, bitwidth);
 
 	bma2x2_remap_sensor_data(acc, client_data);
+
+#ifdef BMA2X2_CAL_USING_SNS_CLASS
+	if (client_data->use_cal) {
+		acc->x -= client_data->cal_params[0];
+		acc->y -= client_data->cal_params[1];
+		acc->z -= client_data->cal_params[2];
+	}
+#endif
 	return comres;
 }
 
@@ -5776,7 +5802,7 @@ static int bma2x2_set_enable(struct device *dev, int enable)
 	if (enable && !pre_enable) {
 		if (!en_sig_motion) {
 			if (bma2x2_power_ctl(bma2x2, true)) {
-				dev_err(dev, "power failed\n");
+				dev_err(dev, "power on failed\n");
 				goto mutex_exit;
 			}
 			if (bma2x2_open_init(client, bma2x2) < 0) {
@@ -5862,7 +5888,7 @@ static int bma2x2_set_enable(struct device *dev, int enable)
 		atomic_set(&bma2x2->enable, 0);
 		if (!en_sig_motion) {
 			if (bma2x2_power_ctl(bma2x2, false)) {
-				dev_err(dev, "power failed\n");
+				dev_err(dev, "power off failed\n");
 				goto mutex_exit;
 			}
 		}
@@ -5991,6 +6017,172 @@ static int bma2x2_cdev_flush(struct sensors_classdev *sensors_cdev)
 	else
 		return 0;
 }
+
+#ifdef BMA2X2_CAL_USING_SNS_CLASS
+static int bma2x2_axis_calibrate(struct bma2x2_data *data,
+		int *cal_xyz)
+{
+	int sum[3] = { 0 };
+	int err;
+	int i;
+	struct bma2x2acc value;
+
+	dev_info(&data->bma2x2_client->dev, "bma2x2_axis_calibrate begin get data:\n");
+
+	for (i = 0; i < BMA2X2_CAL_MAX; i++) {
+		msleep(BMA2X2_CAL_DELAY);
+		err = bma2x2_read_accel_xyz(data->bma2x2_client,
+				data->sensor_type, &value);
+		if (err < 0) {
+			dev_err(&data->bma2x2_client->dev,
+					"bma2x2_axis_calibrate get data failed\n");
+			return err;
+		}
+		if (i < BMA2X2_CAL_SKIP_CNT) {
+			dev_info(&data->bma2x2_client->dev,
+					"bma2x2_axis_calibrate skip the %d accel data=(%d,%d,%d)\n",
+					i, value.x, value.y, value.z);
+			continue;
+		}
+		sum[0] += value.x;
+		sum[1] += value.y;
+		sum[2] += value.z;
+		dev_info(&data->bma2x2_client->dev,
+				"bma2x2_axis_calibrate get the %d accel data=(%d,%d,%d)\n",
+				i, value.x, value.y, value.z);
+
+	}
+
+	cal_xyz[0] = sum[0] / (BMA2X2_CAL_MAX -
+			BMA2X2_CAL_SKIP_CNT);
+	cal_xyz[1] = sum[1] / (BMA2X2_CAL_MAX -
+			BMA2X2_CAL_SKIP_CNT);
+	cal_xyz[2] = sum[2] / (BMA2X2_CAL_MAX -
+			BMA2X2_CAL_SKIP_CNT);
+	dev_info(&data->bma2x2_client->dev,
+			"bma2x2_axis_calibrate sum=(%d,%d,%d), avg=(%d,%d,%d)\n",
+			sum[0], sum[1], sum[2],
+			cal_xyz[0], cal_xyz[1], cal_xyz[2]);
+
+	return 0;
+}
+
+static int bma2x2_calibrate(struct sensors_classdev *sensors_cdev,
+		int axis, int apply_now)
+{
+	struct bma2x2_data *data = container_of(sensors_cdev,
+					struct bma2x2_data,	cdev);
+	struct i2c_client *client = data->bma2x2_client;
+	int xyz[3] = { 0 };
+	int err = 0;
+	bool pre_enable = false;
+	int pre_delay = 0;
+
+	dev_info(&client->dev, "bma2x2_calibrate enter\n");
+
+	data->use_cal = false;
+	pre_enable = atomic_read(&data->enable);
+	if (pre_enable) {
+		bma2x2_set_enable(&client->dev,	0);
+	}
+	pre_delay = atomic_read(&data->delay);
+	dev_info(&client->dev, "bma2x2_calibrate pre_delay=%d\n", pre_delay);
+	atomic_set(&data->delay, 50); /*50ms*/
+
+	bma2x2_set_enable(&client->dev,	1);
+
+	if (atomic_cmpxchg(&data->cal_status, 0, 1)) {
+		dev_err(&client->dev, "do calibration error\n");
+		err = -EBUSY;
+		goto exit;
+	}
+
+	err = bma2x2_axis_calibrate(data, xyz);
+	if (err < 0) {
+		dev_err(&client->dev, "accel calibrate error\n");
+		goto cali_error;
+	}
+
+	dev_info(&client->dev, "bma2x2_calibrate axis=%d\n", axis);
+	switch (axis) {
+	case AXIS_X:
+		xyz[1] = 0;
+		xyz[2] = 0;
+		break;
+	case AXIS_Y:
+		xyz[0] = 0;
+		xyz[2] = 0;
+		break;
+	case AXIS_Z:
+		xyz[0] = 0;
+		xyz[1] = 0;
+		xyz[2] = xyz[2] - RAW_TO_1G;
+		break;
+	case AXIS_XYZ:
+		xyz[2] = xyz[2] - RAW_TO_1G;
+		break;
+	default:
+		dev_err(&client->dev, "can not calibrate accel\n");
+		break;
+	}
+	dev_info(&client->dev, "bma2x2_calibrate offset=(%d,%d,%d)\n",
+				xyz[0], xyz[1], xyz[2]);
+
+	if (abs(xyz[0]) > (int)(BMA2X2_X_AXIS_THRESHOLD) ||
+		abs(xyz[1]) > (int)(BMA2X2_Y_AXIS_THRESHOLD) ||
+		abs(xyz[2]) > (int)(BMA2X2_Z_AXIS_THRESHOLD)) {
+		dev_err(&client->dev, "bma2x2_calibrate failed for exceeding threshold!\n");
+		err = -1;
+		goto cali_error;
+	}
+
+	memset(data->calibrate_buf, 0, sizeof(data->calibrate_buf));
+	snprintf(data->calibrate_buf, sizeof(data->calibrate_buf),
+			"%d,%d,%d", xyz[0], xyz[1], xyz[2]);
+	if (apply_now) {
+		data->cal_params[0] = xyz[0];
+		data->cal_params[1] = xyz[1];
+		data->cal_params[2] = xyz[2];
+		data->use_cal = true;
+		sensors_cdev->params = data->calibrate_buf;
+	}
+
+cali_error:
+	atomic_set(&data->cal_status, 0);
+
+exit:
+	bma2x2_set_enable(&client->dev,	0);
+	if (pre_enable) {
+		atomic_set(&data->delay, pre_delay);
+		bma2x2_set_enable(&client->dev,	1);
+	}
+	dev_info(&client->dev, "bma2x2_calibrate end(%d)\n", err);
+	return err;
+}
+
+static int bma2x2_write_cal_params(struct sensors_classdev *sensors_cdev,
+		struct cal_result_t *cal_result)
+{
+	struct bma2x2_data *data = container_of(sensors_cdev,
+					struct bma2x2_data,	cdev);
+
+	data->cal_params[0] = cal_result->offset_x;
+	data->cal_params[1] = cal_result->offset_y;
+	data->cal_params[2] = cal_result->offset_z;
+
+	snprintf(data->calibrate_buf, sizeof(data->calibrate_buf),
+			"%d,%d,%d", data->cal_params[0],
+			data->cal_params[1], data->cal_params[2]);
+
+	sensors_cdev->params = data->calibrate_buf;
+	data->use_cal = true;
+	dev_info(&data->bma2x2_client->dev, "read accel calibrate bias %d,%d,%d\n",
+		data->cal_params[0], data->cal_params[1], data->cal_params[2]);
+
+	return 0;
+}
+
+#else  /* BMA2X2_CAL_USING_SNS_CLASS */
 
 #ifdef CONFIG_SENSORS_BMI058
 static int bma2x2_select_chanel(struct i2c_client *client)
@@ -6142,6 +6334,8 @@ static int bma2x2_self_calibration_xyz(struct sensors_classdev *sensors_cdev,
 					struct bma2x2_data, cdev);
 	struct i2c_client *client = data->bma2x2_client;
 
+	dev_info(&client->dev, "bma2x2 calibrate enter\n");
+
 	pre_enable = atomic_read(&data->enable);
 	if (pre_enable)
 		bma2x2_set_enable(&client->dev, 0);
@@ -6259,6 +6453,7 @@ static int bma2x2_write_cal_params(struct sensors_classdev *sensors_cdev,
 	sensors_cdev->params = data->calibrate_buf;
 	return 0;
 }
+#endif  /* BMA2X2_CAL_USING_SNS_CLASS */
 
 static ssize_t bma2x2_fast_calibration_x_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -8400,6 +8595,12 @@ static int bma2x2_probe(struct i2c_client *client,
 	data->bandwidth = BMA2X2_BW_SET;
 	data->range = BMA2X2_RANGE_SET;
 	data->sensitivity = bosch_sensor_range_map[0];
+#ifdef BMA2X2_CAL_USING_SNS_CLASS
+	data->cal_params[0] = 0;
+	data->cal_params[1] = 0;
+	data->cal_params[2] = 0;
+	data->use_cal = false;
+#endif
 	atomic_set(&data->cal_status, 0);
 	data->fifo_buf = NULL;
 	err = bma2x2_open_init(client, data);
@@ -8679,8 +8880,14 @@ static int bma2x2_probe(struct i2c_client *client,
 	data->cdev.delay_msec = pdata->poll_interval;
 	data->cdev.sensors_enable = bma2x2_cdev_enable;
 	data->cdev.sensors_poll_delay = bma2x2_cdev_poll_delay;
+
+#ifdef BMA2X2_CAL_USING_SNS_CLASS
+	data->cdev.sensors_calibrate = bma2x2_calibrate;
+#else
 	data->cdev.sensors_calibrate = bma2x2_self_calibration_xyz;
+#endif
 	data->cdev.sensors_write_cal_params = bma2x2_write_cal_params;
+	data->cdev.params = data->calibrate_buf;
 	data->cdev.resolution = sensor_type_map[data->chip_type].resolution;
 	if (pdata->int_en) {
 		if (BMA2x2_IS_NEWDATA_INT_ENABLED())

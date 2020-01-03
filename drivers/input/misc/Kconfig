@@ -219,6 +219,78 @@ config INPUT_MMA8450
 	  To compile this driver as a module, choose M here: the
 	  module will be called mma8450.
 
+# add ALSProx sensor
+
+config SENSORS_LTR559
+	tristate "Liteon LTR559 ambient light and prox sensor"
+	depends on I2C
+	default n
+	help
+	  If you say yes here you get support for the Liteon LTR559
+	  ambient light and prox sensor.
+
+config SENSORS_RPR0521
+	tristate "ROHM RPR0521 ambient light and prox sensor"
+	depends on I2C
+	default n
+	help
+	  If you say yes here you get support for the ROHM RPR0521
+	  ambient light and prox sensor.
+# add ALSProx sensor end
+
+config INPUT_KXTJ2
+	tristate "Kionix KXTJ2 tri-axis digital accelerometer"
+	depends on I2C
+	help
+	  Say Y here to enable support for the Kionix KXTJ2 digital tri-axis
+	  accelerometer.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called kxtj2.
+
+config SENSORS_N2DM
+	tristate "Kionix N2DM tri-axis digital accelerometer"
+	depends on I2C
+	help
+	  Say Y here to enable support for the N2DM digital tri-axis
+	  accelerometer.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called N2DM.
+
+config SENSORS_AKM09911
+	tristate "AKM09911 3-axis electronic compass sensor driver"
+	depends on I2C
+	help
+	  Say Y here if you want to enable the akm09911 ecompass sensor
+	  driver.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called akm09911.
+
+config SENSORS_BMA2X2
+	tristate "BMA2x2 acceleration sensor support"
+	depends on I2C
+	help
+	  If you say yes here, you get support for Bosch Sensortec's
+	  acceleration sensors BMA255/BMA254/BMA355/BMA250E/BMA222E/BMA280.
+
+config SENSORS_BMA2X2_ENABLE_INT1
+	tristate "BMA2X2 acceleration sensor interrupt INT1 support"
+	depends on SENSORS_BMA2X2
+	help
+	 If you say yes here, you get INT1 support for Bosch Sensortec
+	 acceleration sensors BMA255/BMA254/BMA355/BMA250E/BMA222E/BMA280.
+	 Select it will disable interrupt INT2 support
+
+config SENSORS_BMA2X2_ENABLE_INT2
+	tristate "BMA2X2 acceleration sensor interrupt INT2 support"
+	depends on SENSORS_BMA2X2 && !SENSORS_BMA2X2_ENABLE_INT1
+	help
+	 If you say yes here, you get INT2 support for Bosch Sensortec
+	 acceleration sensors BMA255/BMA254/BMA355/BMA250E/BMA222E/BMA280.
+	 Can only open if you do NOT open interrupt INT1 support
+
 config INPUT_MPU3050
 	tristate "MPU3050 Triaxial gyroscope sensor"
 	depends on I2C
@@ -777,7 +849,95 @@ config INPUT_DRV2667_HAPTICS
 	  To compile this driver as a module, choose M here: the
 	  module will be called drv260x-haptics.
 
+config SENSORS_HALL_AH1898
+	tristate "HALL sensor for ah1898"
+	default n
+	help
+	  This driver provides support for the AH1898 HALL sensor
+	  The sensor report a gpio interrupt for input system. The sensor is for
+	  /sys/bus/platform/ah1898.
+
 source "drivers/input/misc/ots_pat9125/Kconfig"
+
+#lijiangshuo add bmi160 driver start */
+config SENSORS_BMI160
+	tristate "BMI160 Sensor Support"
+	depends on I2C || SPI_MASTER
+	help
+	 If you say yes here, you get support for Bosch Sensortec's
+         sensor driver of BMI160.
+
+config SENSORS_BMI160_I2C
+	tristate "support I2C bus communication"
+	depends on SENSORS_BMI160 && I2C
+	help
+	 If you say yes here, you get support Bosch Sensortec's BMI160 sensor hooked to an I2C bus.
+
+config BMI160_MAG_INTERFACE_SUPPORT
+	tristate "BMI160 Sensor mag interface support"
+	depends on SENSORS_BMI160
+	help
+	 If you say yes here, you get support for Bosch Sensortec's
+	 sensor driver of BMI160 with mag sensor support.
+
+config SENSORS_BMI160_ENABLE_INT1
+	tristate "BMI160 sensor interrupt INT1 support"
+	depends on SENSORS_BMI160
+	help
+	 If you say yes here, you get INT1 support for Bosch Sensortec
+	 sensors BMI160.
+
+config SENSORS_BMI160_ENABLE_INT2
+	tristate "BMI160 sensor interrupt INT2 support"
+	depends on SENSORS_BMI160
+	help
+	 If you say yes here, you get INT2 support for Bosch Sensortec
+	 sensors BMI160.
+#lijiangshuo add bmi160 driver end
+
+#lijiangshuo add lsm6ds3 driver start
+config SENSORS_LSM6DS3
+	tristate "LSM6DS3 Sensor Support"
+	depends on I2C || SPI_MASTER
+	help
+	If you say yes here, you get support for ST Sensortec's
+        sensor driver of LSM6DS3.
+#lijiangshuo add lsm6ds3 driver end
+
+#luxiazi add lsm6dse driver start
+config INPUT_LSM6DSE
+         tristate "STMicroelectronics LSM6DSE sensor"
+         depends on I2C && SYSFS
+         help
+           This driver support the STMicroelectronics LSM6DSE sensor.
+           To compile this driver as a module, choose M here. The module
+		   will be called lsm6dse.
+
+if INPUT_LSM6DSE
+choice
+	prompt "LSM6DSE bus selection"
+	default INPUT_LSM6DSE_I2C
+
+config INPUT_LSM6DSE_I2C
+	bool "I2C"
+
+config INPUT_LSM6DSE_SPI
+	bool "SPI"
+endchoice
+
+choice
+	prompt "LSM6DSE mode selection"
+	default LSM6DSE_POLLING_MODE
+
+config LSM6DSE_POLLING_MODE
+	bool "Polling"
+
+config LSM6DSE_FIFO_MODE
+	bool "FIFO trigger"
+endchoice
+
+endif
+#luxiazi add lsm6dse driver end
 
 config SENSORS_AP3426
 	tristate "AP3426 3-in-1 digital ALPS+PS+IRLED sensor driver"
@@ -854,4 +1014,16 @@ config DOUBLE_TAP
 	help
 	 If you say yes here, you get support Bosch double tap sensor function
 
+config INPUT_SX9310
+	tristate "SX9325_SAR_sensor"
+	depends on I2C
+	default n
+	help
+	  Say Y to enable the SAR detection application, if N here not to use the
+	  this SAR sensor
+
 endif
+
+config ZTE_SAR_TABLEMODE_FUNCTION
+	depends on INPUT_SX9310
+	bool "Support for ZTE sar of table mode"

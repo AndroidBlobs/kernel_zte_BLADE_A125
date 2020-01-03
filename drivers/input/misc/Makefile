@@ -39,6 +39,7 @@ obj-$(CONFIG_INPUT_IXP4XX_BEEPER)	+= ixp4xx-beeper.o
 obj-$(CONFIG_INPUT_KEYCHORD)		+= keychord.o
 obj-$(CONFIG_INPUT_KEYSPAN_REMOTE)	+= keyspan_remote.o
 obj-$(CONFIG_INPUT_KXTJ9)		+= kxtj9.o
+obj-$(CONFIG_INPUT_KXTJ2)		+= kionix_accel.o
 obj-$(CONFIG_INPUT_M68K_BEEP)		+= m68kspkr.o
 obj-$(CONFIG_INPUT_MAX77693_HAPTIC)	+= max77693-haptic.o
 obj-$(CONFIG_INPUT_MAX8925_ONKEY)	+= max8925_onkey.o
@@ -72,11 +73,12 @@ obj-$(CONFIG_INPUT_WISTRON_BTNS)	+= wistron_btns.o
 obj-$(CONFIG_INPUT_WM831X_ON)		+= wm831x-on.o
 obj-$(CONFIG_INPUT_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
 obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
+obj-$(CONFIG_SENSORS_LTR559)		+= ltr559.o
+obj-$(CONFIG_SENSORS_N2DM)		+= n2dm_acc.o
 obj-$(CONFIG_SENSORS_MMC3416X)		+= mmc3416x.o
 obj-$(CONFIG_SENSORS_AKM09911)		+= akm09911.o
 obj-$(CONFIG_SENSORS_AP3426)		+= ap3426.o
 obj-$(CONFIG_SENSORS_BMA2X2)	+= bstclass.o
-
 obj-$(CONFIG_SENSORS_BMA2X2)	+= bma2x2.o
 obj-$(CONFIG_SENSORS_LTR553)	+= ltr553.o
 
@@ -88,4 +90,37 @@ ifeq ($(CONFIG_BOSCH_BMA2X2_ENABLE_INT2),y)
 	EXTRA_CFLAGS += -DBMA2X2_ENABLE_INT2
 endif
 obj-$(CONFIG_INPUT_IDEAPAD_SLIDEBAR)	+= ideapad_slidebar.o
+obj-$(CONFIG_SENSORS_HALL_AH1898) += ah1898.o
 obj-$(CONFIG_INPUT_PIXART_OTS_PAT9125_SWITCH)	+= ots_pat9125/
+
+#lijiangshuo add bmi160 driver start
+obj-$(CONFIG_SENSORS_BMI160) += bmi160_driver.o bmi160.o
+ifeq ($(CONFIG_BMI160_MAG_INTERFACE_SUPPORT),y)
+	EXTRA_CFLAGS += -DBMI160_MAG_INTERFACE_SUPPORT
+endif
+ifeq ($(CONFIG_SENSORS_BMI160_ENABLE_INT1),y)
+	EXTRA_CFLAGS += -DBMI160_ENABLE_INT1
+endif
+
+ifeq ($(CONFIG_SENSORS_BMI160_ENABLE_INT2),y)
+	EXTRA_CFLAGS += -DBMI160_ENABLE_INT2
+endif
+
+obj-$(CONFIG_SENSORS_BMI160_I2C) += bmi160_i2c.o
+ifeq ($(CONFIG_SENSORS_BMI160_I2C),y)
+	EXTRA_CFLAGS += -DBMI_USE_BASIC_I2C_FUNC
+endif
+#lijiangshuo add bmi160 driver end
+
+#lijiangshuo add lsm6ds3 driver start
+obj-$(CONFIG_SENSORS_LSM6DS3) += lsm6ds3_core.o lsm6ds3_i2c.o
+#lijiangshuo add lsm6ds3 driver end
+
+#luxiazi add lsm6dse driver start
+obj-$(CONFIG_INPUT_LSM6DSE) += lsm6dse.o
+
+lsm6dse-y := lsm6dse_core.o
+obj-$(CONFIG_INPUT_LSM6DSE_I2C) += lsm6dse_i2c.o
+obj-$(CONFIG_INPUT_LSM6DSE_SPI) += lsm6dse_spi.o
+#luxiazi add lsm6dse driver end
+obj-$(CONFIG_INPUT_SX9310)		+= sx9310.o
