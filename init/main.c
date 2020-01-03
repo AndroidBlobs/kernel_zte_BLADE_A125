@@ -94,7 +94,10 @@ static int kernel_init(void *);
 extern void init_IRQ(void);
 extern void fork_init(unsigned long);
 extern void radix_tree_init(void);
-
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+struct workqueue_struct *deferred_initcall_wq;
+struct work_struct  deferred_initcall_work;
+#endif
 /*
  * Debug helper: via this flag we know that we are in 'early bootup code'
  * where only the boot processor is running with IRQ disabled.  This means
@@ -956,6 +959,59 @@ static inline void mark_readonly(void)
 }
 #endif
 
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+static atomic_t deferred_initcalls_done = ATOMIC_INIT(1);
+static ssize_t deferred_initcalls_done_read_proc(struct file *file, char __user *buf,
+					   size_t nbytes, loff_t *ppos)
+{
+	int ret, len;
+	char tmp[3] = "1\n";
+
+	snprintf(tmp, 3, "%d\n", atomic_read(&deferred_initcalls_done));
+	tmp[2] = '\0';
+	len = min_t(size_t, nbytes, 3);
+	ret = copy_to_user(buf, tmp, len);
+	if (ret)
+		return -EFAULT;
+	*ppos += len;
+
+	return len;
+}
+
+
+static const struct file_operations deferred_initcalls_done_fops = {
+	.read           = deferred_initcalls_done_read_proc,
+};
+
+extern initcall_t __deferred_initcall_start[], __deferred_initcall_end[];
+
+
+/* call deferred init routines */
+void do_deferred_initcalls(void)
+{
+	initcall_t *call;
+
+	pr_info("Running do_deferred_initcalls()\n");
+
+	for (call = __deferred_initcall_start;
+	    call < __deferred_initcall_end; call++)
+		do_one_initcall(*call);
+
+	flush_scheduled_work();
+
+	free_initmem();
+
+	atomic_set(&deferred_initcalls_done, 1);
+}
+
+
+
+static void  deferred_initcall_work_func(struct work_struct *work)
+{
+	do_deferred_initcalls();
+}
+#endif
+
 static int __ref kernel_init(void *unused)
 {
 	int ret;
@@ -963,13 +1019,26 @@ static int __ref kernel_init(void *unused)
 	kernel_init_freeable();
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
+#ifndef CONFIG_DO_DEFERRED_INITCALL
 	free_initmem();
+#endif
 	mark_readonly();
 	system_state = SYSTEM_RUNNING;
 	numa_default_policy();
 
 	flush_delayed_fput();
 
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+	atomic_set(&deferred_initcalls_done, 0);
+	proc_create("deferred_initcalls_done", 0, NULL, &deferred_initcalls_done_fops);
+	deferred_initcall_wq = create_singlethread_workqueue("deferred_initcall_wq");
+	if (!deferred_initcall_wq) {
+		pr_err("Could not create work queue deferred_initcall_wq: no memory");
+	}
+	INIT_WORK(&deferred_initcall_work, deferred_initcall_work_func);
+	queue_work(deferred_initcall_wq, &deferred_initcall_work);
+	pr_info("deferred_initcall_work is queued\n");
+#endif
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);
 		if (!ret)

@@ -452,6 +452,10 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			connected to one of 16 gameports
 			Format: <type1>,<type2>,..<type16>
 
+	androidboot.kern_transport=	[KNL] android zlog buffer support
+			Used to check whether android zlog buffer created or not
+			decimal 0 for not, or non-zero for creating
+
 	apc=		[HW,SPARC]
 			Power management functions (SPARCstation-4/5 + deriv.)
 			Format: noidle
@@ -557,6 +561,11 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			kernel args too.
 	bttv.pll=	See Documentation/video4linux/bttv/Insmod-options
 	bttv.tuner=
+
+	buildvariant=	[KNL] android zlog buffer support
+			Used to check whether android zlog buffer created or not
+			user, eng or userdebug are used
+			dm-android-verity.c also defined it, but using different names
 
 	bulk_remove=off	[PPC]  This parameter disables the use of the pSeries
 			firmware feature for flushing multiple hpte entries

@@ -1152,7 +1152,7 @@ endif #CGROUP_SCHED
 config BLK_CGROUP
 	bool "Block IO controller"
 	depends on BLOCK
-	default n
+	default y
 	---help---
 	Generic block IO controller cgroup interface. This is the common
 	cgroup interface which should be used by various IO controlling
@@ -2114,5 +2114,8 @@ config ASN1
 	  that can be interpreted by the ASN.1 stream decoder and used to
 	  inform it as to what tags are to be expected in a stream and what
 	  functions to call on what tags.
+
+config DO_DEFERRED_INITCALL
+	bool "Enable multithreading module init to reduce boot time"
 
 source "kernel/Kconfig.locks"
