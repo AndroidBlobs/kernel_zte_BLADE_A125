@@ -46,6 +46,23 @@ struct msm_eeprom_ctrl_t {
 	int32_t userspace_probe;
 	struct msm_eeprom_memory_block_t cal_data;
 	uint8_t is_supported;
+/*
+  * camera sensor module compatile
+  *
+  * by ZTE_YCM_20140728 yi.changming 000028
+  */
+	const char *sensor_module_name;
+	const char *chromtix_lib_name;
+	const char *default_chromtix_lib_name;
+
+/*
+* Post compatible module info to vendor.by FENGYUAO_20150528.
+*/
+	#define SENSOR_NAME_MAX_SIZE 32
+	char zte_post_sensor_module_name[SENSOR_NAME_MAX_SIZE];
+	char zte_post_chromtix_lib_name[SENSOR_NAME_MAX_SIZE];
+	char zte_post_default_chromtix_lib_name[SENSOR_NAME_MAX_SIZE];
+/* end */
 };
 
 #endif
