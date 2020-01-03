@@ -36,8 +36,6 @@
 #define F2FS_NODE_INO(sbi)	(sbi->node_ino_num)
 #define F2FS_META_INO(sbi)	(sbi->meta_ino_num)
 
-#define F2FS_MAX_QUOTAS		3
-
 #define F2FS_IO_SIZE(sbi)	(1 << (sbi)->write_io_size_bits) /* Blocks */
 #define F2FS_IO_SIZE_KB(sbi)	(1 << ((sbi)->write_io_size_bits + 2)) /* KB */
 #define F2FS_IO_SIZE_BYTES(sbi)	(1 << ((sbi)->write_io_size_bits + 12)) /* B */
@@ -62,6 +60,15 @@
 #define MAX_VOLUME_NAME		512
 #define MAX_PATH_LEN		64
 #define MAX_DEVICES		8
+
+
+#define F2FS_DEF_RESUID 0
+#define F2FS_DEF_RESGID 0
+
+
+#define ZTE_F2FS_VERSION "ZTE1.0"
+#define ZTE_F2FS_VERSION_LEN 8
+
 
 /*
  * For superblock
@@ -110,8 +117,14 @@ struct f2fs_super_block {
 	__u8 encryption_level;		/* versioning level for encryption */
 	__u8 encrypt_pw_salt[16];	/* Salt used for string2key algorithm */
 	struct f2fs_device devs[MAX_DEVICES];	/* device list */
-	__le32 qf_ino[F2FS_MAX_QUOTAS];	/* quota inode numbers */
-	__u8 reserved[315];		/* valid reserved region */
+	__u8 reserved[311];	/* valid reserved region */
+	
+	__le32 s_resv_segments;
+	__le16 s_def_resuid;
+	__le16 s_def_resgid;
+	
+	
+	__u8 zte_version[ZTE_F2FS_VERSION_LEN];
 } __packed;
 
 /*
@@ -187,8 +200,7 @@ struct f2fs_extent {
 } __packed;
 
 #define F2FS_NAME_LEN		255
-/* 200 bytes for inline xattrs by default */
-#define DEFAULT_INLINE_XATTR_ADDRS	50
+#define F2FS_INLINE_XATTR_ADDRS	50	/* 200 bytes for inline xattrs */
 #define DEF_ADDRS_PER_INODE	923	/* Address Pointers in an Inode */
 #define CUR_ADDRS_PER_INODE(inode)	(DEF_ADDRS_PER_INODE - \
 					get_extra_isize(inode))
@@ -213,6 +225,9 @@ struct f2fs_extent {
 #define F2FS_INLINE_DOTS	0x10	/* file having implicit dot dentries */
 #define F2FS_EXTRA_ATTR		0x20	/* file having extra attribute */
 
+#define F2FS_PIN_FILE		0x40	/* file should not be gced */
+/* end modify */
+
 struct f2fs_inode {
 	__le16 i_mode;			/* file mode */
 	__u8 i_advise;			/* file hints */
@@ -229,7 +244,15 @@ struct f2fs_inode {
 	__le32 i_ctime_nsec;		/* change time in nano scale */
 	__le32 i_mtime_nsec;		/* modification time in nano scale */
 	__le32 i_generation;		/* file version (for NFS) */
-	__le32 i_current_depth;		/* only for directory depth */
+	
+	union {
+		__le32 i_current_depth;	/* only for directory depth */
+		__le16 i_gc_failures;	/*
+					 * # of gc failures on pinned file.
+					 * only for regular files.
+					 */
+	};
+	/* end modify */
 	__le32 i_xattr_nid;		/* nid to save xattr */
 	__le32 i_flags;			/* file attributes */
 	__le32 i_pino;			/* parent inode number */
@@ -242,7 +265,7 @@ struct f2fs_inode {
 	union {
 		struct {
 			__le16 i_extra_isize;	/* extra inode attribute size */
-			__le16 i_inline_xattr_size;	/* inline xattr size, unit: 4 bytes */
+			__le16 i_padding;	/* padding */
 			__le32 i_projid;	/* project id */
 			__le32 i_inode_checksum;/* inode meta checksum */
 			__le32 i_extra_end[0];	/* for attribute size calculation */
@@ -477,7 +500,7 @@ typedef __le32	f2fs_hash_t;
 #define MAX_DIR_BUCKETS		(1 << ((MAX_DIR_HASH_DEPTH / 2) - 1))
 
 /*
- * space utilization of regular dentry and inline dentry (w/o extra reservation)
+ * space utilization of regular dentry and inline dentry
  *		regular dentry			inline dentry
  * bitmap	1 * 27 = 27			1 * 23 = 23
  * reserved	1 * 3 = 3			1 * 7 = 7
