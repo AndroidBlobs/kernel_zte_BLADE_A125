@@ -147,9 +147,9 @@
 	};
 };
 
-&i2c_1 { /* BLSP1 QUP1 */
-	bosch@18 { /* Accelerometer sensor */
-		compatible = "bosch,bma2x2";
+/*&i2c_1 { /* BLSP1 QUP1 */
+/*	bosch@18 { /* Accelerometer sensor */
+/*		compatible = "bosch,bma2x2";
 		reg = <0x18>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&bma2x2_int1_default &bma2x2_int2_default>;
@@ -163,7 +163,7 @@
 		bosch,gpio-int2 = <&msm_gpio 65 0x2002>;
 	};
 };
-
+*/
 &pm8909_vadc {
 	chan@30 {
 		qcom,scale-function = <6>;

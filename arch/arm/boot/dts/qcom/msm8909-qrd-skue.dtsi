@@ -438,13 +438,13 @@
 
 &pm8909_vadc {
 	chan@30 {
-		qcom,scale-function = <14>;
+		qcom,scale-function = <1>;
 	};
 };
 
 &pm8909_adc_tm {
 	chan@30 {
-		qcom,scale-function = <8>;
+		qcom,scale-function = <1>;
 	};
 };
 
@@ -459,19 +459,4 @@
 	status = "okay";
 };
 
-/ {
-	qrd_batterydata: qcom,battery-data {
-		qcom,rpull-up-kohm = <0>;
-		qcom,vref-batt-therm = <1800000>;
 
-		#include "batterydata-qrd-skue-4v35-2000mah.dtsi"
-	};
-};
-
-&pm8909_bms {
-	status = "okay";
-	qcom,resume-soc = <95>;
-	qcom,use-reported-soc;
-	qcom,force-bms-active-on-charger;
-	qcom,battery-data = <&qrd_batterydata>;
-};

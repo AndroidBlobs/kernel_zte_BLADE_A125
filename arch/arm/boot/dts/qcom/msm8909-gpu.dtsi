@@ -57,6 +57,7 @@
 
 		qcom,idle-timeout = <80>; //msec
 		qcom,strtstp-sleepwake;
+		qcom,snapshot-size = <0>; //bytes
 
 		/*
 		 * Clocks = KGSL_CLK_CORE | KGSL_CLK_IFACE |

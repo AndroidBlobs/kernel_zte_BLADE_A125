@@ -123,7 +123,7 @@
 			linux,default-trigger = "none";
 		};
 	};
-
+/*
 	i2c@78b5000 { /* BLSP1 QUP1 */
 		liteon@23 {
 			compatible = "liteon,ltr553";
@@ -175,7 +175,7 @@
 			akm,auto-report;
 			akm,use-hrtimer;
 		};
-	};
+	};*/
 };
 
 &spmi_bus {

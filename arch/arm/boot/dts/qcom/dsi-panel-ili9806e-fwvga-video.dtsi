@@ -17,8 +17,8 @@
 		qcom,mdss-dsi-panel-framerate = <60>;
 		qcom,mdss-dsi-virtual-channel-id = <0>;
 		qcom,mdss-dsi-stream = <0>;
-		qcom,mdss-dsi-panel-width = <480>;
-		qcom,mdss-dsi-panel-height = <854>;
+		qcom,mdss-dsi-panel-width = <240>;
+		qcom,mdss-dsi-panel-height = <320>;
 		qcom,mdss-dsi-h-front-porch = <54>;
 		qcom,mdss-dsi-h-back-porch = <100>;
 		qcom,mdss-dsi-h-pulse-width = <36>;

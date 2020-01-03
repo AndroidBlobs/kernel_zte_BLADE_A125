@@ -172,7 +172,12 @@
 		vdd-supply = <&pm8916_l11>;
 		vdd-io-supply = <&pm8916_l12>;
 	};
-
+	/* dual spi start */
+	qcom,mdss_spi {
+		vdd-supply = <&pm8916_l17>;	/*2.8V*/
+		vddio-supply = <&pm8916_l6>;	/*no use,1.8v is controlled by gpio12*/
+	};
+	/* dual spi end */
 	qcom,mdss_dsi@0 {
 		vdda-supply = <&pm8916_l2>;
 		vddio-supply = <&pm8916_l6>;
