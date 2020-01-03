@@ -42,6 +42,8 @@
 
 #include "peripheral-loader.h"
 
+#include <linux/reboot.h>
+
 #define pil_err(desc, fmt, ...)						\
 	dev_err(desc->dev, "%s: " fmt, desc->name, ##__VA_ARGS__)
 #define pil_info(desc, fmt, ...)					\
@@ -847,6 +849,9 @@ int pil_boot(struct pil_desc *desc)
 	if (ret) {
 		pil_err(desc, "Invalid firmware metadata\n");
 		subsys_set_error(desc->subsys_dev, firmware_error_msg);
+#ifdef CONFIG_ZTE_PIL_AUTH_ERROR_DETECTION
+		kernel_restart("unauth");
+#endif
 		goto err_boot;
 	}
 
@@ -892,6 +897,11 @@ int pil_boot(struct pil_desc *desc)
 	if (ret) {
 		pil_err(desc, "Failed to bring out of reset\n");
 		subsys_set_error(desc->subsys_dev, firmware_error_msg);
+#ifdef CONFIG_ZTE_PIL_AUTH_ERROR_DETECTION
+		if (ret == -ENOEXEC) {
+			kernel_restart("unauth");
+		}
+#endif
 		goto err_auth_and_reset;
 	}
 	pil_info(desc, "Brought out of reset\n");
