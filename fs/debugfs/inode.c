@@ -28,7 +28,7 @@
 #include <linux/magic.h>
 #include <linux/slab.h>
 
-#define DEBUGFS_DEFAULT_MODE	0700
+#define DEBUGFS_DEFAULT_MODE	0755
 
 static struct vfsmount *debugfs_mount;
 static int debugfs_mount_count;
@@ -674,6 +674,7 @@ bool debugfs_initialized(void)
 EXPORT_SYMBOL_GPL(debugfs_initialized);
 
 
+#if !defined(ZTE_FEATURE_TF_SECURITY_SYSTEM) || defined(ZTE_FEATURE_TF_DEBUG) || defined(ZTE_FEATURE_TF_PARTIAL)
 static struct kobject *debug_kobj;
 
 static int __init debugfs_init(void)
@@ -692,5 +693,11 @@ static int __init debugfs_init(void)
 
 	return retval;
 }
+#else
+static int __init debugfs_init(void)
+{
+	return 0;
+}
+#endif
 core_initcall(debugfs_init);
 
