@@ -12,7 +12,12 @@ menuconfig INPUT_TOUCHSCREEN
 if INPUT_TOUCHSCREEN
 
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
+
 source "drivers/input/touchscreen/synaptics_dsx_2.6/Kconfig"
+
+source "drivers/input/touchscreen/mstar_3.3/Kconfig"
+
+source "drivers/input/touchscreen/synaptics_zte_2.7/Kconfig"
 
 config OF_TOUCHSCREEN
 	def_tristate INPUT
@@ -1123,6 +1128,41 @@ config TOUCHSCREEN_GT9XX
 
           If unsure, say N.
 
+config TOUCHSCREEN_GT9XX_ZTE
+	bool "Goodix touchpanel GT9xx_zte series"
+	depends on I2C
+	help
+	  Say Y here if you have a Goodix GT9xx touchscreen.
+	  Gt9xx controllers are multi touch controllers which can
+	  report 5 touches at a time.
+
+          If unsure, say N.
+
+source "drivers/input/touchscreen/gt9xx_zte/Kconfig"
+config TOUCHSCREEN_GT1X_ZTE
+	bool "GT1X touchpanel"
+	depends on I2C
+	help
+	  Say Y here if you have a Goodix GT9xx touchscreen.
+	  Gt9xx controllers are multi touch controllers which can
+	  report 5 touches at a time.
+
+          If unsure, say N.
+
+source "drivers/input/touchscreen/gt1x_zte/Kconfig"
+
+config TOUCHSCREEN_FTS_ZTE
+	bool "GT1X touchpanel"
+	depends on I2C
+	help
+	  Say Y here if you have a Goodix GT9xx touchscreen.
+	  Gt9xx controllers are multi touch controllers which can
+	  report 5 touches at a time.
+
+          If unsure, say N.
+
+source "drivers/input/touchscreen/ft_zte/Kconfig"
+
 config TOUCHSCREEN_MAXIM_STI
 	tristate "Maxim based STI touchscreens"
 	depends on SPI_MASTER
@@ -1136,5 +1176,46 @@ config TOUCHSCREEN_MAXIM_STI
 	  module will be called maxim_sti.
 
 source "drivers/input/touchscreen/gt9xx/Kconfig"
+config TS_FIRMWARE
+	string "config board firmware folder"
+config TOUCHSCREEN_FTS_TP_TEST
+		tristate "focaltech touchscreens"
+		depends on I2C
+		help
+		Say Y here if you have a fts touchscreen.
 
+		If unsure, say N.
+
+		To compile this driver as a module, choose M here: the
+		module will be called focaltech_ts.
+
+source "drivers/input/touchscreen/focaltech_touch/Kconfig"
+source "drivers/input/touchscreen/focaltech_touch_V2_1/Kconfig"
+
+config TOUCHSCREEN_FOCALTECH
+		tristate "focaltech touchscreens"
+		depends on I2C
+		help
+		Say Y here if you have a fts touchscreen.
+
+		If unsure, say N.
+
+		To compile this driver as a module, choose M here: the
+		module will be called focaltech_ts.
+source "drivers/input/touchscreen/focaltech/Kconfig"
+
+config ZTE_TPD_SYS
+		tristate "touchscreens common debug interface"
+		depends on I2C
+		help
+			Say Y here if you have  touchscreens common debug interface.
+
+			If unsure, say N.
+config TP_COMMON_INTERFACE
+	bool "Open TP common interface"
+	depends on I2C
+	help
+	  Say Y here if you want to use TP common interface.
+
+	  If unsure, say N.
 endif

@@ -198,13 +198,23 @@
 static ssize_t concat(test_sysfs, _##propname##_show)(\
 		struct device *dev,\
 		struct device_attribute *attr,\
-		char *buf);
+		char *buf);\
+\
+static struct device_attribute dev_attr_##propname =\
+		__ATTR(propname, S_IRUGO,\
+		concat(test_sysfs, _##propname##_show),\
+		synaptics_rmi4_store_error);
 
 #define store_prototype(propname)\
 static ssize_t concat(test_sysfs, _##propname##_store)(\
 		struct device *dev,\
 		struct device_attribute *attr,\
-		const char *buf, size_t count);
+		const char *buf, size_t count);\
+\
+static struct device_attribute dev_attr_##propname =\
+		__ATTR(propname, S_IWUSR|S_IWGRP,\
+		synaptics_rmi4_show_error,\
+		concat(test_sysfs, _##propname##_store));
 
 #define show_store_prototype(propname)\
 static ssize_t concat(test_sysfs, _##propname##_show)(\
@@ -218,7 +228,7 @@ static ssize_t concat(test_sysfs, _##propname##_store)(\
 		const char *buf, size_t count);\
 \
 static struct device_attribute dev_attr_##propname =\
-		__ATTR(propname, (S_IRUGO | S_IWUGO),\
+		__ATTR(propname, (S_IRUGO | S_IWUSR | S_IWGRP),\
 		concat(test_sysfs, _##propname##_show),\
 		concat(test_sysfs, _##propname##_store));
 
@@ -1120,7 +1130,6 @@ static bool test_report_type_valid(enum f54_report_types report_type)
 	case F54_AMP_FULL_RAW_CAP:
 	case F54_AMP_RAW_ADC:
 		return true;
-		break;
 	default:
 		f54->report_type = INVALID_REPORT_TYPE;
 		f54->report_size = 0;
@@ -1209,7 +1218,7 @@ static void test_set_report_size(void)
 		f54->report_size = 0;
 	}
 
-	return;
+
 }
 
 static int test_set_interrupt(bool set)
@@ -1646,7 +1655,7 @@ static void test_timeout_work(struct work_struct *work)
 exit:
 	mutex_unlock(&f54->status_mutex);
 
-	return;
+
 }
 
 static enum hrtimer_restart test_get_report_timeout(struct hrtimer *timer)
@@ -2258,7 +2267,7 @@ static ssize_t test_sysfs_read_report_show(struct device *dev,
 		buf += cnt;
 		count += cnt;
 		for (ii = 0; ii < rx_num; ii++) {
-			cnt = snprintf(buf, PAGE_SIZE - count, "     %2d", ii);
+			cnt = snprintf(buf, PAGE_SIZE - count, "	 %2d", ii);
 			buf += cnt;
 			count += cnt;
 		}
@@ -2284,7 +2293,7 @@ static ssize_t test_sysfs_read_report_show(struct device *dev,
 		buf += cnt;
 		count += cnt;
 		for (ii = 0; ii < tx_num; ii++) {
-			cnt = snprintf(buf, PAGE_SIZE - count, "     %2d", ii);
+			cnt = snprintf(buf, PAGE_SIZE - count, "	 %2d", ii);
 			buf += cnt;
 			count += cnt;
 		}
@@ -2314,7 +2323,7 @@ static ssize_t test_sysfs_read_report_show(struct device *dev,
 		buf += cnt;
 		count += cnt;
 		for (ii = 0; ii < rx_num; ii++) {
-			cnt = snprintf(buf, PAGE_SIZE - count, "     %2d", ii);
+			cnt = snprintf(buf, PAGE_SIZE - count, "	 %2d", ii);
 			buf += cnt;
 			count += cnt;
 		}
@@ -2340,7 +2349,7 @@ static ssize_t test_sysfs_read_report_show(struct device *dev,
 		buf += cnt;
 		count += cnt;
 		for (ii = 0; ii < tx_num; ii++) {
-			cnt = snprintf(buf, PAGE_SIZE - count, "     %2d", ii);
+			cnt = snprintf(buf, PAGE_SIZE - count, "	 %2d", ii);
 			buf += cnt;
 			count += cnt;
 		}
@@ -2550,7 +2559,7 @@ exit:
 
 	f54->status = retval;
 
-	return;
+
 }
 
 static void test_remove_sysfs(void)
@@ -2559,7 +2568,7 @@ static void test_remove_sysfs(void)
 	sysfs_remove_bin_file(f54->sysfs_dir, &test_report_data);
 	kobject_put(f54->sysfs_dir);
 
-	return;
+
 }
 
 static int test_set_sysfs(void)
@@ -2618,7 +2627,7 @@ static void test_free_control_mem(void)
 	kfree(control.reg_149);
 	kfree(control.reg_188);
 
-	return;
+
 }
 
 static void test_set_data(void)
@@ -2737,7 +2746,7 @@ static void test_set_data(void)
 		reg_addr++;
 	}
 
-	return;
+
 }
 
 static int test_set_controls(void)
@@ -3640,7 +3649,7 @@ static void test_f54_set_regs(struct synaptics_rmi4_data *rmi4_data,
 		f54->intr_mask |= 1 << ii;
 	}
 
-	return;
+
 }
 
 static int test_f55_set_queries(void)
@@ -3781,7 +3790,20 @@ static void test_f55_init(struct synaptics_rmi4_data *rmi4_data)
 		return;
 
 	f55->tx_assignment = kzalloc(tx_electrodes, GFP_KERNEL);
+	if (!f55->tx_assignment) {
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Failed to kzalloc tx_assignment\n",
+				__func__);
+		return;
+	}
+
 	f55->rx_assignment = kzalloc(rx_electrodes, GFP_KERNEL);
+	if (!f55->rx_assignment) {
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Failed to kzalloc rx_assignment\n",
+				__func__);
+		return;
+	}
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			f55->control_base_addr + SENSOR_TX_MAPPING_OFFSET,
@@ -3791,6 +3813,8 @@ static void test_f55_init(struct synaptics_rmi4_data *rmi4_data)
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read f55 tx assignment\n",
 				__func__);
+		kfree(f55->tx_assignment);
+		kfree(f55->rx_assignment);
 		return;
 	}
 
@@ -3802,6 +3826,8 @@ static void test_f55_init(struct synaptics_rmi4_data *rmi4_data)
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read f55 rx assignment\n",
 				__func__);
+		kfree(f55->tx_assignment);
+		kfree(f55->rx_assignment);
 		return;
 	}
 
@@ -3822,7 +3848,7 @@ static void test_f55_init(struct synaptics_rmi4_data *rmi4_data)
 		f54->rx_assigned /= 2;
 	}
 
-	return;
+
 }
 
 static void test_f55_set_regs(struct synaptics_rmi4_data *rmi4_data,
@@ -3842,7 +3868,7 @@ static void test_f55_set_regs(struct synaptics_rmi4_data *rmi4_data,
 	f55->data_base_addr = fd->data_base_addr | (page << 8);
 	f55->command_base_addr = fd->cmd_base_addr | (page << 8);
 
-	return;
+
 }
 
 static int test_scan_pdt(void)
@@ -3914,7 +3940,7 @@ static void synaptics_rmi4_test_attn(struct synaptics_rmi4_data *rmi4_data,
 	if (f54->intr_mask & intr_mask)
 		queue_work(f54->test_report_workqueue, &f54->test_report_work);
 
-	return;
+
 }
 
 static int synaptics_rmi4_test_init(struct synaptics_rmi4_data *rmi4_data)
@@ -3968,9 +3994,6 @@ static int synaptics_rmi4_test_init(struct synaptics_rmi4_data *rmi4_data)
 
 	if (f55)
 		test_f55_init(rmi4_data);
-
-	if (rmi4_data->external_afe_buttons)
-		f54->tx_assigned++;
 
 	retval = test_set_sysfs();
 	if (retval < 0) {
@@ -4044,7 +4067,7 @@ static void synaptics_rmi4_test_remove(struct synaptics_rmi4_data *rmi4_data)
 exit:
 	complete(&test_remove_complete);
 
-	return;
+
 }
 
 static void synaptics_rmi4_test_reset(struct synaptics_rmi4_data *rmi4_data)
@@ -4094,9 +4117,6 @@ static void synaptics_rmi4_test_reset(struct synaptics_rmi4_data *rmi4_data)
 	if (f55)
 		test_f55_init(rmi4_data);
 
-	if (rmi4_data->external_afe_buttons)
-		f54->tx_assigned++;
-
 	f54->status = STATUS_IDLE;
 
 	return;
@@ -4122,7 +4142,7 @@ exit_free_mem:
 	kfree(f54);
 	f54 = NULL;
 
-	return;
+
 }
 
 static struct synaptics_rmi4_exp_fn test_module = {
@@ -4151,7 +4171,7 @@ static void __exit rmi4_test_module_exit(void)
 
 	wait_for_completion(&test_remove_complete);
 
-	return;
+
 }
 
 module_init(rmi4_test_module_init);

@@ -157,7 +157,7 @@ static void prox_hover_finger_lift(void)
 	input_sync(prox->prox_dev);
 	prox->hover_finger_present = false;
 
-	return;
+
 }
 
 static void prox_hover_finger_report(void)
@@ -207,7 +207,7 @@ static void prox_hover_finger_report(void)
 
 	prox->hover_finger_present = true;
 
-	return;
+
 }
 
 static int prox_set_hover_finger_en(void)
@@ -255,7 +255,7 @@ static void prox_set_params(void)
 	input_set_abs_params(prox->prox_dev, ABS_DISTANCE, 0,
 			HOVER_Z_MAX, 0, 0);
 
-	return;
+
 }
 
 static int prox_reg_init(void)
@@ -345,7 +345,6 @@ static int prox_scan_pdt(void)
 				switch (fd.fn_number) {
 				case SYNAPTICS_RMI4_F12:
 					goto f12_found;
-					break;
 				}
 			} else {
 				break;
@@ -421,7 +420,7 @@ static ssize_t synaptics_rmi4_hover_finger_en_store(struct device *dev,
 	if (!prox)
 		return -ENODEV;
 
-	if (sscanf(buf, "%x", &input) != 1)
+	if (kstrtouint(buf, 0, &input) < 0)
 		return -EINVAL;
 
 	if (input == 1)
@@ -468,7 +467,7 @@ static void synaptics_rmi4_prox_attn(struct synaptics_rmi4_data *rmi4_data,
 	if (prox->intr_mask & intr_mask)
 		prox_hover_finger_report();
 
-	return;
+
 }
 
 static int synaptics_rmi4_prox_init(struct synaptics_rmi4_data *rmi4_data)
@@ -604,7 +603,7 @@ static void synaptics_rmi4_prox_remove(struct synaptics_rmi4_data *rmi4_data)
 exit:
 	complete(&prox_remove_complete);
 
-	return;
+
 }
 
 static void synaptics_rmi4_prox_reset(struct synaptics_rmi4_data *rmi4_data)
@@ -620,7 +619,7 @@ static void synaptics_rmi4_prox_reset(struct synaptics_rmi4_data *rmi4_data)
 
 	prox_set_hover_finger_en();
 
-	return;
+
 }
 
 static void synaptics_rmi4_prox_reinit(struct synaptics_rmi4_data *rmi4_data)
@@ -632,7 +631,7 @@ static void synaptics_rmi4_prox_reinit(struct synaptics_rmi4_data *rmi4_data)
 
 	prox_set_hover_finger_en();
 
-	return;
+
 }
 
 static void synaptics_rmi4_prox_e_suspend(struct synaptics_rmi4_data *rmi4_data)
@@ -642,7 +641,7 @@ static void synaptics_rmi4_prox_e_suspend(struct synaptics_rmi4_data *rmi4_data)
 
 	prox_hover_finger_lift();
 
-	return;
+
 }
 
 static void synaptics_rmi4_prox_suspend(struct synaptics_rmi4_data *rmi4_data)
@@ -652,7 +651,7 @@ static void synaptics_rmi4_prox_suspend(struct synaptics_rmi4_data *rmi4_data)
 
 	prox_hover_finger_lift();
 
-	return;
+
 }
 
 static struct synaptics_rmi4_exp_fn proximity_module = {
@@ -681,7 +680,7 @@ static void __exit rmi4_proximity_module_exit(void)
 
 	wait_for_completion(&prox_remove_complete);
 
-	return;
+
 }
 
 module_init(rmi4_proximity_module_init);

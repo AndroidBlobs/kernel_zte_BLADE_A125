@@ -37,7 +37,7 @@
 #define SYNAPTICS_DS4 (1 << 0)
 #define SYNAPTICS_DS5 (1 << 1)
 #define SYNAPTICS_DSX_DRIVER_PRODUCT (SYNAPTICS_DS4 | SYNAPTICS_DS5)
-#define SYNAPTICS_DSX_DRIVER_VERSION 0x2061
+#define SYNAPTICS_DSX_DRIVER_VERSION 0x2064
 
 #include <linux/version.h>
 #ifdef CONFIG_FB
@@ -48,18 +48,11 @@
 #include <linux/earlysuspend.h>
 #endif
 
-#if defined(CONFIG_SECURE_TOUCH_SYNAPTICS_DSX_V26)
-#include <linux/completion.h>
-#include <linux/atomic.h>
-#include <linux/pm_runtime.h>
-#include <linux/clk.h>
-#endif
-
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 38))
+#if (KERNEL_VERSION(2, 6, 38) < LINUX_VERSION_CODE)
 #define KERNEL_ABOVE_2_6_38
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0))
+#if (KERNEL_VERSION(3, 7, 0) <= LINUX_VERSION_CODE)
 #define KERNEL_ABOVE_3_6
 #endif
 
@@ -69,13 +62,20 @@
 #define sstrtoul(...) strict_strtoul(__VA_ARGS__)
 #endif
 
+/*#define F51_DISCRETE_FORCE*/
+#ifdef F51_DISCRETE_FORCE
+/*#define FORCE_LEVEL_ADDR 0x041A*/
+#define FORCE_LEVEL_MAX 255
+#define CAL_DATA_SIZE 144
+#endif
+
 #define PDT_PROPS (0X00EF)
 #define PDT_START (0x00E9)
 #define PDT_END (0x00D0)
 #define PDT_ENTRY_SIZE (0x0006)
 #define PAGES_TO_SERVICE (10)
 #define PAGE_SELECT_LEN (2)
-#define ADDRESS_WORD_LEN (2)
+#define ADDRESS_LEN (2)
 
 #define SYNAPTICS_RMI4_F01 (0x01)
 #define SYNAPTICS_RMI4_F11 (0x11)
@@ -122,9 +122,6 @@
 #define MASK_2BIT 0x03
 #define MASK_1BIT 0x01
 
-#define PINCTRL_STATE_ACTIVE    "pmx_ts_active"
-#define PINCTRL_STATE_SUSPEND   "pmx_ts_suspend"
-#define PINCTRL_STATE_RELEASE   "pmx_ts_release"
 enum exp_fn {
 	RMI_DEV = 0,
 	RMI_FW_UPDATER,
@@ -258,6 +255,11 @@ struct synaptics_rmi4_device_info {
 	struct list_head support_fn_list;
 };
 
+struct rmi_config_id {
+	__u8 chip_type;
+	__u8 sensor;
+	__u16 fw_ver;
+};
 /*
  * struct synaptics_rmi4_data - RMI4 device instance data
  * @pdev: pointer to platform device
@@ -319,8 +321,12 @@ struct synaptics_rmi4_device_info {
  * @report_touch: pointer to touch reporting function
  */
 struct synaptics_rmi4_data {
+	struct pinctrl *ts_pinctrl;
+	struct pinctrl_state *gpio_state_active;
+	struct pinctrl_state *gpio_state_suspend;
 	struct platform_device *pdev;
 	struct input_dev *input_dev;
+	struct i2c_client *i2c_client;
 	struct input_dev *stylus_dev;
 	const struct synaptics_dsx_hw_interface *hw_if;
 	struct synaptics_rmi4_device_info rmi4_mod_info;
@@ -331,10 +337,13 @@ struct synaptics_rmi4_data {
 	struct mutex rmi4_report_mutex;
 	struct mutex rmi4_io_ctrl_mutex;
 	struct mutex rmi4_exp_init_mutex;
+	struct mutex rmi4_irq_enable_mutex;
+	struct mutex rmi4_hall_mutex;
 	struct delayed_work rb_work;
 	struct workqueue_struct *rb_workqueue;
+	struct work_struct  work;
+	struct rmi_config_id	config_id;
 #ifdef CONFIG_FB
-	struct work_struct fb_notify_work;
 	struct notifier_block fb_notifier;
 	struct work_struct reset_work;
 	struct workqueue_struct *reset_workqueue;
@@ -358,6 +367,9 @@ struct synaptics_rmi4_data {
 	unsigned short f01_cmd_base_addr;
 	unsigned short f01_ctrl_base_addr;
 	unsigned short f01_data_base_addr;
+#ifdef F51_DISCRETE_FORCE
+	unsigned short f51_query_base_addr;
+#endif
 	unsigned int firmware_id;
 	int irq;
 	int sensor_max_x;
@@ -370,8 +382,14 @@ struct synaptics_rmi4_data {
 	bool stay_awake;
 	bool fb_ready;
 	bool f11_wakeup_gesture;
+	bool f11_glove;
+	bool f11_smart_cover;
 	bool f12_wakeup_gesture;
+	bool f12_glove;
+	bool f12_smart_cover;
 	bool enable_wakeup_gesture;
+	bool enable_glove;
+	bool enable_smart_cover;
 	bool wedge_sensor;
 	bool report_pressure;
 	bool stylus_enable;
@@ -385,19 +403,6 @@ struct synaptics_rmi4_data {
 			bool enable);
 	void (*report_touch)(struct synaptics_rmi4_data *rmi4_data,
 			struct synaptics_rmi4_fn *fhandler);
-	struct pinctrl *ts_pinctrl;
-	struct pinctrl_state *pinctrl_state_active;
-	struct pinctrl_state *pinctrl_state_suspend;
-	struct pinctrl_state *pinctrl_state_release;
-#if defined(CONFIG_SECURE_TOUCH_SYNAPTICS_DSX_V26)
-	atomic_t st_enabled;
-	atomic_t st_pending_irqs;
-	struct completion st_powerdown;
-	struct completion st_irq_processed;
-	bool st_initialized;
-	struct clk *core_clk;
-	struct clk *iface_clk;
-#endif
 };
 
 struct synaptics_dsx_bus_access {
@@ -406,10 +411,6 @@ struct synaptics_dsx_bus_access {
 		unsigned char *data, unsigned short length);
 	int (*write)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
 		unsigned char *data, unsigned short length);
-#if defined(CONFIG_SECURE_TOUCH_SYNAPTICS_DSX_V26)
-	int (*get)(struct synaptics_rmi4_data *rmi4_data);
-	void (*put)(struct synaptics_rmi4_data *rmi4_data);
-#endif
 };
 
 struct synaptics_dsx_hw_interface {
@@ -433,9 +434,9 @@ struct synaptics_rmi4_exp_fn {
 			unsigned char intr_mask);
 };
 
-int synaptics_rmi4_bus_init_v26(void);
+int synaptics_rmi4_bus_init(void);
 
-void synaptics_rmi4_bus_exit_v26(void);
+void synaptics_rmi4_bus_exit(void);
 
 void synaptics_rmi4_new_function(struct synaptics_rmi4_exp_fn *exp_fn_module,
 		bool insert);
@@ -460,16 +461,21 @@ static inline int synaptics_rmi4_reg_write(
 	return rmi4_data->hw_if->bus_access->write(rmi4_data, addr, data, len);
 }
 
-#if defined(CONFIG_SECURE_TOUCH_SYNAPTICS_DSX_V26)
-static inline int synaptics_rmi4_bus_get(struct synaptics_rmi4_data *rmi4_data)
+static inline ssize_t synaptics_rmi4_show_error(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	return rmi4_data->hw_if->bus_access->get(rmi4_data);
+	dev_warn(dev, "%s Attempted to read from write-only attribute %s\n",
+			__func__, attr->attr.name);
+	return -EPERM;
 }
-static inline void synaptics_rmi4_bus_put(struct synaptics_rmi4_data *rmi4_data)
+
+static inline ssize_t synaptics_rmi4_store_error(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
 {
-	rmi4_data->hw_if->bus_access->put(rmi4_data);
+	dev_warn(dev, "%s Attempted to write to read-only attribute %s\n",
+			__func__, attr->attr.name);
+	return -EPERM;
 }
-#endif
 
 static inline int secure_memcpy(unsigned char *dest, unsigned int dest_size,
 		const unsigned char *src, unsigned int src_size,

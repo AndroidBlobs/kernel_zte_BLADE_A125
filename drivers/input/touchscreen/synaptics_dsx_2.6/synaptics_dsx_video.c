@@ -113,10 +113,10 @@ static struct dcs_command resume_sequence[] = {
 
 static struct device_attribute attrs[] = {
 	__ATTR(dcs_write, S_IWUGO,
-			NULL,
+			synaptics_rmi4_show_error,
 			video_sysfs_dcs_write_store),
 	__ATTR(param, S_IWUGO,
-			NULL,
+			synaptics_rmi4_show_error,
 			video_sysfs_param_store),
 };
 
@@ -130,7 +130,7 @@ static ssize_t video_sysfs_dcs_write_store(struct device *dev,
 	int retval;
 	unsigned int input;
 
-	if (sscanf(buf, "%x", &input) != 1)
+	if (kstrtouint(buf, 0, &input) < 0)
 		return -EINVAL;
 
 	retval = video_send_dcs_command((unsigned char)input);
@@ -145,7 +145,7 @@ static ssize_t video_sysfs_param_store(struct device *dev,
 {
 	unsigned int input;
 
-	if (sscanf(buf, "%x", &input) != 1)
+	if (kstrtouint(buf, 0, &input) < 0)
 		return -EINVAL;
 
 	video->param = (unsigned char)input;
@@ -315,7 +315,7 @@ static void synaptics_rmi4_video_remove(struct synaptics_rmi4_data *rmi4_data)
 exit:
 	complete(&video_remove_complete);
 
-	return;
+
 }
 
 static void synaptics_rmi4_video_reset(struct synaptics_rmi4_data *rmi4_data)
@@ -323,7 +323,7 @@ static void synaptics_rmi4_video_reset(struct synaptics_rmi4_data *rmi4_data)
 	if (!video)
 		synaptics_rmi4_video_init(rmi4_data);
 
-	return;
+
 }
 
 #ifdef RMI_DCS_SUSPEND_RESUME
@@ -347,7 +347,7 @@ static void synaptics_rmi4_video_suspend(struct synaptics_rmi4_data *rmi4_data)
 		msleep(suspend_sequence[ii].wait_time);
 	}
 
-	return;
+
 }
 
 static void synaptics_rmi4_video_resume(struct synaptics_rmi4_data *rmi4_data)
@@ -370,7 +370,7 @@ static void synaptics_rmi4_video_resume(struct synaptics_rmi4_data *rmi4_data)
 		msleep(resume_sequence[ii].wait_time);
 	}
 
-	return;
+
 }
 #endif
 
@@ -405,7 +405,6 @@ static void __exit rmi4_video_module_exit(void)
 
 	wait_for_completion(&video_remove_complete);
 
-	return;
 }
 
 module_init(rmi4_video_module_init);

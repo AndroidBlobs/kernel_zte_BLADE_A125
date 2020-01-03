@@ -489,7 +489,7 @@ static ssize_t udg_sysfs_engine_enable_store(struct device *dev,
 	bool enable;
 	unsigned int input;
 
-	if (sscanf(buf, "%u", &input) != 1)
+	if (kstrtouint(buf, 0, &input) < 0)
 		return -EINVAL;
 
 	if (input == 1)
@@ -513,7 +513,7 @@ static ssize_t udg_sysfs_detection_enable_store(struct device *dev,
 	bool enable;
 	unsigned int input;
 
-	if (sscanf(buf, "%u", &input) != 1)
+	if (kstrtouint(buf, 0, &input) < 0)
 		return -EINVAL;
 
 	if (input == 1)
@@ -553,7 +553,7 @@ static ssize_t udg_sysfs_registration_enable_store(struct device *dev,
 	struct synaptics_rmi4_f12_control_41 control_41;
 	struct synaptics_rmi4_data *rmi4_data = udg->rmi4_data;
 
-	if (sscanf(buf, "%u", &input) != 1)
+	if (kstrtouint(buf, 0, &input) < 0)
 		return -EINVAL;
 
 	if (input == 1)
@@ -632,7 +632,7 @@ static ssize_t udg_sysfs_registration_begin_store(struct device *dev,
 	struct synaptics_rmi4_f12_control_41 control_41;
 	struct synaptics_rmi4_data *rmi4_data = udg->rmi4_data;
 
-	if (sscanf(buf, "%u", &input) != 1)
+	if (kstrtouint(buf, 0, &input) < 0)
 		return -EINVAL;
 
 	if (input == 1)
@@ -820,7 +820,7 @@ static ssize_t udg_sysfs_template_clear_store(struct device *dev,
 	const char cmd[] = {'0', 0};
 	struct synaptics_rmi4_data *rmi4_data = udg->rmi4_data;
 
-	if (sscanf(buf, "%u", &input) != 1)
+	if (kstrtouint(buf, 0, &input) < 0)
 		return -EINVAL;
 
 	if (input != 1)
@@ -905,9 +905,9 @@ static ssize_t udg_sysfs_trace_data_show(struct file *data_file,
 				"%s: Failed to read trace X data\n",
 				__func__);
 		return retval;
-	} else {
-		index += udg->trace_size * 2;
 	}
+
+	index += udg->trace_size * 2;
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			udg->addr.trace_y,
@@ -918,9 +918,9 @@ static ssize_t udg_sysfs_trace_data_show(struct file *data_file,
 				"%s: Failed to read trace Y data\n",
 				__func__);
 		return retval;
-	} else {
-		index += udg->trace_size * 2;
 	}
+
+	index += udg->trace_size * 2;
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			udg->addr.trace_segment,
@@ -1505,7 +1505,7 @@ static void udg_report(void)
 		}
 	}
 
-	return;
+
 }
 
 static int udg_set_index(unsigned char index)
@@ -1830,7 +1830,7 @@ static int udg_reg_init(void)
 
 #ifdef STORE_GESTURES
 	udg->gestures_to_store = udg->max_num_templates;
-	if (GESTURES_TO_STORE < udg->gestures_to_store)
+	if (udg->gestures_to_store > GESTURES_TO_STORE)
 		udg->gestures_to_store = GESTURES_TO_STORE;
 #endif
 
@@ -1889,7 +1889,6 @@ static int udg_scan_pdt(void)
 				switch (fd.fn_number) {
 				case SYNAPTICS_RMI4_F12:
 					goto f12_found;
-					break;
 				}
 			} else {
 				break;
@@ -1954,7 +1953,7 @@ static void synaptics_rmi4_udg_attn(struct synaptics_rmi4_data *rmi4_data,
 	if (udg->intr_mask & intr_mask)
 		udg_report();
 
-	return;
+
 }
 
 static int synaptics_rmi4_udg_init(struct synaptics_rmi4_data *rmi4_data)
@@ -2185,7 +2184,6 @@ static void synaptics_rmi4_udg_remove(struct synaptics_rmi4_data *rmi4_data)
 exit:
 	complete(&udg_remove_complete);
 
-	return;
 }
 
 static void synaptics_rmi4_udg_reset(struct synaptics_rmi4_data *rmi4_data)
@@ -2202,7 +2200,7 @@ static void synaptics_rmi4_udg_reset(struct synaptics_rmi4_data *rmi4_data)
 	udg_write_valid_data();
 #endif
 
-	return;
+
 }
 
 static void synaptics_rmi4_udg_reinit(struct synaptics_rmi4_data *rmi4_data)
@@ -2216,7 +2214,7 @@ static void synaptics_rmi4_udg_reinit(struct synaptics_rmi4_data *rmi4_data)
 	udg_write_valid_data();
 #endif
 
-	return;
+
 }
 
 static void synaptics_rmi4_udg_e_suspend(struct synaptics_rmi4_data *rmi4_data)
@@ -2231,7 +2229,7 @@ static void synaptics_rmi4_udg_e_suspend(struct synaptics_rmi4_data *rmi4_data)
 	udg_engine_enable(true);
 	udg_detection_enable(true);
 
-	return;
+
 }
 
 static void synaptics_rmi4_udg_suspend(struct synaptics_rmi4_data *rmi4_data)
@@ -2246,7 +2244,7 @@ static void synaptics_rmi4_udg_suspend(struct synaptics_rmi4_data *rmi4_data)
 	udg_engine_enable(true);
 	udg_detection_enable(true);
 
-	return;
+
 }
 
 static void synaptics_rmi4_udg_resume(struct synaptics_rmi4_data *rmi4_data)
@@ -2257,7 +2255,7 @@ static void synaptics_rmi4_udg_resume(struct synaptics_rmi4_data *rmi4_data)
 	disable_irq_wake(rmi4_data->irq);
 	udg_detection_enable(false);
 
-	return;
+
 }
 
 static void synaptics_rmi4_udg_l_resume(struct synaptics_rmi4_data *rmi4_data)
@@ -2268,7 +2266,7 @@ static void synaptics_rmi4_udg_l_resume(struct synaptics_rmi4_data *rmi4_data)
 	disable_irq_wake(rmi4_data->irq);
 	udg_detection_enable(false);
 
-	return;
+
 }
 
 static struct synaptics_rmi4_exp_fn gesture_module = {
@@ -2297,7 +2295,7 @@ static void __exit rmi4_gesture_module_exit(void)
 
 	wait_for_completion(&udg_remove_complete);
 
-	return;
+
 }
 
 module_init(rmi4_gesture_module_init);

@@ -122,7 +122,7 @@ static struct i2c_rw_buffer buffer;
 #ifdef CONFIG_OF
 static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 {
-	int retval;
+	int retval = 0;
 	u32 value;
 	const char *name;
 	struct property *prop;
@@ -160,7 +160,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		if (retval < 0) {
 			dev_err(dev, "%s: Unable to read synaptics,power-on-state property\n",
 					__func__);
-			return retval;
+			goto exit_loop;
 		} else {
 			bdata->power_on_state = value;
 		}
@@ -175,7 +175,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		if (retval < 0) {
 			dev_err(dev, "%s: Unable to read synaptics,power-delay-ms property\n",
 					__func__);
-			return retval;
+			goto exit_loop;
 		} else {
 			bdata->power_delay_ms = value;
 		}
@@ -192,7 +192,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		if (retval < 0) {
 			dev_err(dev, "%s: Unable to read synaptics,reset-on-state property\n",
 					__func__);
-			return retval;
+			goto exit_loop;
 		} else {
 			bdata->reset_on_state = value;
 		}
@@ -201,7 +201,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		if (retval < 0) {
 			dev_err(dev, "%s: Unable to read synaptics,reset-active-ms property\n",
 					__func__);
-			return retval;
+			goto exit_loop;
 		} else {
 			bdata->reset_active_ms = value;
 		}
@@ -216,7 +216,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		if (retval < 0) {
 			dev_err(dev, "%s: Unable to read synaptics,reset-delay-ms property\n",
 					__func__);
-			return retval;
+			goto exit_loop;
 		} else {
 			bdata->reset_delay_ms = value;
 		}
@@ -231,7 +231,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		if (retval < 0) {
 			dev_err(dev, "%s: Unable to read synaptics,dev-dscrptr-addr property\n",
 					__func__);
-			return retval;
+			goto exit_loop;
 		} else {
 			bdata->device_descriptor_addr = (unsigned short)value;
 		}
@@ -246,7 +246,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		if (retval < 0) {
 			dev_err(dev, "%s: Unable to read synaptics,max-y-for-2d property\n",
 					__func__);
-			return retval;
+			goto exit_loop;
 		} else {
 			bdata->max_y_for_2d = value;
 		}
@@ -270,7 +270,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		if (retval < 0) {
 			dev_err(dev, "%s: Unable to read synaptics,ub-i2c-addr property\n",
 					__func__);
-			return retval;
+			goto exit_loop;
 		} else {
 			bdata->ub_i2c_addr = (unsigned short)value;
 		}
@@ -321,7 +321,8 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		bdata->vir_button_map->map = NULL;
 	}
 
-	return 0;
+exit_loop:
+	return retval;
 }
 #endif
 
@@ -422,7 +423,7 @@ static void traverse_report_descriptor(unsigned int *index)
 		break;
 	}
 
-	return;
+
 }
 
 static void find_blob_size(unsigned int index)
@@ -441,7 +442,7 @@ static void find_blob_size(unsigned int index)
 		traverse_report_descriptor(&ii);
 	}
 
-	return;
+
 }
 
 static void find_reports(unsigned int index)
@@ -489,7 +490,7 @@ static void find_reports(unsigned int index)
 		}
 	}
 
-	return;
+
 }
 
 static int parse_report_descriptor(struct synaptics_rmi4_data *rmi4_data)
@@ -862,7 +863,7 @@ static void synaptics_rmi4_i2c_dev_release(struct device *dev)
 {
 	kfree(synaptics_dsx_i2c_device);
 
-	return;
+
 }
 
 static int synaptics_rmi4_i2c_probe(struct i2c_client *client,
@@ -965,7 +966,7 @@ static const struct i2c_device_id synaptics_rmi4_id_table[] = {
 MODULE_DEVICE_TABLE(i2c, synaptics_rmi4_id_table);
 
 #ifdef CONFIG_OF
-static struct of_device_id synaptics_rmi4_of_match_table[] = {
+static const struct of_device_id synaptics_rmi4_of_match_table[] = {
 	{
 		.compatible = "synaptics,dsx-rmi-hid-i2c",
 	},
@@ -997,7 +998,7 @@ void synaptics_rmi4_bus_exit_v26(void)
 {
 	i2c_del_driver(&synaptics_rmi4_i2c_driver);
 
-	return;
+
 }
 EXPORT_SYMBOL(synaptics_rmi4_bus_exit_v26);
 
