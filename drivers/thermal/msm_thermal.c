@@ -4884,6 +4884,29 @@ done_store_cc:
 	return count;
 }
 
+static ssize_t show_cpu_temp_set(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", msm_thermal_info.limit_temp_degC);
+}
+
+static ssize_t __ref store_cpu_temp_set(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int ret = 0;
+	int val = 0;
+
+	ret = kstrtoint(buf, 10, &val);
+	if (ret) {
+		pr_err("Invalid input %s. err:%d\n", buf, ret);
+		return -EINVAL;
+	}
+
+	msm_thermal_info.limit_temp_degC = val;
+
+	return count;
+}
+
 static ssize_t show_cpus_offlined(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
@@ -4937,9 +4960,13 @@ __ATTR(enabled, 0644, show_cc_enabled, store_cc_enabled);
 static __refdata struct kobj_attribute cpus_offlined_attr =
 __ATTR(cpus_offlined, 0644, show_cpus_offlined, store_cpus_offlined);
 
+static __refdata struct kobj_attribute cpu_temp_set_attr =
+__ATTR(cpu_temp_set, 0644, show_cpu_temp_set, store_cpu_temp_set);
+
 static __refdata struct attribute *cc_attrs[] = {
 	&cc_enabled_attr.attr,
 	&cpus_offlined_attr.attr,
+	&cpu_temp_set_attr.attr,
 	NULL,
 };
 
