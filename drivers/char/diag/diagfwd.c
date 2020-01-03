@@ -39,6 +39,7 @@
 #include "diag_usb.h"
 #include "diag_mux.h"
 
+void msm_ignore_sd_dump(int enable);
 #define STM_CMD_VERSION_OFFSET	4
 #define STM_CMD_MASK_OFFSET	5
 #define STM_CMD_DATA_OFFSET	6
@@ -398,6 +399,69 @@ void diag_send_rsp(unsigned char *buf, int len)
 	else
 		encode_rsp_and_send(buf, len);
 }
+
+/* begin-4-diag security implementation */
+#ifdef DIAG_LOCK_ON
+
+#include "critical_diag_cmd.h"
+
+static int pkt_pass_permission_check(unsigned char *ptr)
+{
+	unsigned char cmd_code;
+	unsigned char subsys_id;
+	unsigned short subsys_cmd_code;
+	unsigned char *temp = ptr;
+	int size = sizeof(critical_diag_packets)/sizeof(diag_packet_type);
+	int i, match = 0;
+
+	cmd_code = *(unsigned char *)temp;
+	temp++;
+	subsys_id = *(unsigned char *)temp;
+	temp++;
+	subsys_cmd_code = *(unsigned short *)temp;
+
+	/* filter harmful diag commands */
+	for (i = 0; i < size; i++) {
+		switch (critical_diag_packets[i].packet_check_length) {
+		case 1: /* check length: 1 byte */
+			if (cmd_code == critical_diag_packets[i].cmd_code)
+				match = 1;
+			break;
+
+		case 2: /* check length: 2 bytes */
+			if ((cmd_code == critical_diag_packets[i].cmd_code) &&
+				(subsys_id == critical_diag_packets[i].subsys_id))
+					match = 1;
+			break;
+
+		case 4: /* check length: 4 bytes */
+			if ((cmd_code == critical_diag_packets[i].cmd_code) &&
+				(subsys_id == critical_diag_packets[i].subsys_id) &&
+				(subsys_cmd_code == critical_diag_packets[i].subsys_cmd_code))
+					match = 1;
+			break;
+
+		default:
+			break;
+		}
+
+		if (match == 1)
+			return 0;
+	}
+
+	/*********************
+	75_251: unlock password
+	**********************/
+	if (!is_diag_locked() ||
+		((cmd_code == 75) && (subsys_id == 251))) {
+		return 1;
+	} else
+		return 0;
+
+}
+
+#endif
+/* end-4-diag security implementation */
 
 void diag_update_pkt_buffer(unsigned char *buf, uint32_t len, int type)
 {
@@ -885,6 +949,17 @@ int diag_process_apps_pkt(unsigned char *buf, int len,
 	if (!buf)
 		return -EIO;
 
+/* begin-5-diag security implementation */
+#ifdef DIAG_LOCK_ON
+	if (!pkt_pass_permission_check(buf)) {
+		pr_debug("diag: In %s, pkt_pass_permission_check: %s\n", __func__, buf);
+		driver->apps_rsp_buf[0] = 0x13;     /*diag successful return value begins with 0x13*/
+		diag_send_rsp(driver->apps_rsp_buf, 1);
+		return 0;
+	}
+#endif
+/* end-5-diag security implementation */
+
 	/* Check if the command is a supported mask command */
 	mask_ret = diag_process_apps_masks(buf, len, info);
 	if (mask_ret > 0) {
@@ -983,6 +1058,8 @@ int diag_process_apps_pkt(unsigned char *buf, int len,
 		msleep(5000);
 		/* call download API */
 		msm_set_restart_mode(RESTART_DLOAD);
+		/* ensure that do not enter into sd dump */
+		msm_ignore_sd_dump(1);
 		printk(KERN_CRIT "diag: download mode set, Rebooting SoC..\n");
 		kernel_restart(NULL);
 		/* Not required, represents that command isnt sent to modem */
@@ -1583,7 +1660,7 @@ int diagfwd_init(void)
 	for (i = 0; i < DIAG_NUM_PROC; i++)
 		driver->real_time_mode[i] = 1;
 	driver->supports_separate_cmdrsp = 1;
-	driver->supports_apps_hdlc_encoding = 1;
+	driver->supports_apps_hdlc_encoding = 0;
 	mutex_init(&driver->diag_hdlc_mutex);
 	mutex_init(&driver->diag_cntl_mutex);
 	mutex_init(&driver->mode_lock);

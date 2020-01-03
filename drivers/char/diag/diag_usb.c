@@ -29,10 +29,37 @@
 #include "diag_usb.h"
 #include "diag_mux.h"
 #include "diagmem.h"
+
+/* begin-7-diag security implementation */
+#include "diagfwd.h"
+/* end-7-diag security implementation */
+
 #include "diag_ipc_logging.h"
 
 #define DIAG_USB_STRING_SZ	10
 #define DIAG_USB_MAX_SIZE	16384
+
+/* begin-8-diag security implementation */
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+#ifdef DIAG_LOCK_ON
+static int diag_locked = 1;
+#else
+static int diag_locked = 0;
+#endif
+
+module_param(diag_locked, int, S_IRUGO);
+
+int is_diag_locked(void)
+{
+#ifdef DIAG_LOCK_ON
+	return  diag_locked;
+#else
+	return 0;
+#endif
+}
+EXPORT_SYMBOL(is_diag_locked);
+#endif
+/* end-8-diag security implementation */
 
 struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 	{
@@ -482,6 +509,13 @@ int diag_usb_write(int id, unsigned char *buf, int len, int ctxt)
 	int err = 0;
 	struct diag_request *req = NULL;
 	struct diag_usb_info *usb_info = NULL;
+
+/* begin-9-diag security implementation */
+#ifdef DIAG_LOCK_ON
+	const unsigned char *ptr_buf = buf;
+#endif
+/* end-9-diag security implementation */
+
 	unsigned long flags;
 
 	if (id < 0 || id >= NUM_DIAG_USB_DEV) {
@@ -523,6 +557,35 @@ int diag_usb_write(int id, unsigned char *buf, int len, int ctxt)
 		diagmem_free(driver, req, usb_info->mempool);
 		return -ENODEV;
 	}
+
+/* begin-10-diag security implementation */
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+
+#ifdef DIAG_LOCK_ON
+	if (diag_locked && ptr_buf[0] == 0x4b
+		&& ptr_buf[1] == 0xfb
+		&& ptr_buf[2] == 0x02
+		&& ptr_buf[3] == 0x00
+		&& ptr_buf[4] == 0x01) {  /* diag unlock packets */
+		diag_locked = 0;
+	}
+#ifdef ZTE_FEATURE_TF_DEBUG
+	if (diag_locked && ptr_buf[0] == 0x4b
+		&& ptr_buf[1] == 0xfb
+		&& ptr_buf[2] == 0x02
+		&& ptr_buf[3] == 0x00) {
+			if (ptr_buf[4] == 0x03) {
+				/* diag debug build,  unlock */
+				diag_locked = 0;
+			} else if (ptr_buf[4] == 0x04) {
+				/* diag debug build,  lockup */
+				diag_locked = 1;
+			}
+	}
+#endif
+#endif
+#endif
+/* end-10-diag security implementation */
 
 	spin_lock_irqsave(&usb_info->write_lock, flags);
 	if (diag_usb_buf_tbl_add(usb_info, buf, len, ctxt)) {

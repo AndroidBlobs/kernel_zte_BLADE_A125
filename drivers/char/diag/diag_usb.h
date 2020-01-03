@@ -38,6 +38,21 @@
 
 #define DIAG_USB_MODE		0
 
+/* begin-6-diag security implementation */
+/*choose macro
+    ZTE_FEATURE_TF_SECURITY_SYSTEM_HIGH
+    ZTE_FEATURE_TF_SECURITY_SYSTEM */
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+#ifndef ZTE_TF_RC1
+#define DIAG_LOCK_ON
+#endif
+#endif
+
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+int is_diag_locked(void);
+#endif
+/* end-6-diag security implementation */
+
 struct diag_usb_buf_tbl_t {
 	struct list_head track;
 	unsigned char *buf;
