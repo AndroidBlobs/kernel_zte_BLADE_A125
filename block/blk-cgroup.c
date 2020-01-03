@@ -930,6 +930,8 @@ struct cgroup_subsys blkio_cgrp_subsys = {
 	.css_offline = blkcg_css_offline,
 	.css_free = blkcg_css_free,
 	.can_attach = blkcg_can_attach,
+	/* block cgroup from lihujun */
+	.allow_attach = subsys_cgroup_allow_attach,
 	.legacy_cftypes = blkcg_files,
 #ifdef CONFIG_MEMCG
 	/*

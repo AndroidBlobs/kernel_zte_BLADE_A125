@@ -20,6 +20,10 @@
 
 #include "partitions/check.h"
 
+extern char *saved_command_line;
+#define N_OTA_O_STR "N_OTA_O"
+#define RECOVERY_MODE_STR "androidboot.mode=recovery"
+
 #ifdef CONFIG_BLK_DEV_MD
 extern void md_autodetect_dev(dev_t dev);
 #endif
@@ -386,6 +390,117 @@ out_put:
 	return ERR_PTR(err);
 }
 
+struct hd_struct *add_partition_Ex(struct gendisk *disk, int partno,
+				sector_t start, sector_t len, int flags,
+				struct partition_meta_info *info, int readonly)
+{
+	struct hd_struct *p;
+	dev_t devt = MKDEV(0, 0);
+	struct device *ddev = disk_to_dev(disk);
+	struct device *pdev;
+	struct disk_part_tbl *ptbl;
+	const char *dname;
+	int err;
+
+	err = disk_expand_part_tbl(disk, partno);
+	if (err)
+		return ERR_PTR(err);
+	ptbl = disk->part_tbl;
+
+	if (ptbl->part[partno])
+		return ERR_PTR(-EBUSY);
+
+	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	if (!p)
+		return ERR_PTR(-EBUSY);
+
+	if (!init_part_stats(p)) {
+		err = -ENOMEM;
+		goto out_free;
+	}
+
+	seqcount_init(&p->nr_sects_seq);
+	pdev = part_to_dev(p);
+
+	p->start_sect = start;
+	p->alignment_offset =
+		queue_limit_alignment_offset(&disk->queue->limits, start);
+	p->discard_alignment =
+		queue_limit_discard_alignment(&disk->queue->limits, start);
+	p->nr_sects = len;
+	p->partno = partno;
+	/*p->policy = get_disk_ro(disk);*/
+	p->policy = readonly;
+
+	if (info) {
+		struct partition_meta_info *pinfo = alloc_part_info(disk);
+
+		if (!pinfo)
+			goto out_free_stats;
+		memcpy(pinfo, info, sizeof(*info));
+		p->info = pinfo;
+	}
+
+	dname = dev_name(ddev);
+	if (isdigit(dname[strlen(dname) - 1]))
+		dev_set_name(pdev, "%sp%d", dname, partno);
+	else
+		dev_set_name(pdev, "%s%d", dname, partno);
+
+	device_initialize(pdev);
+	pdev->class = &block_class;
+	pdev->type = &part_type;
+	pdev->parent = ddev;
+
+	err = blk_alloc_devt(p, &devt);
+	if (err)
+		goto out_free_info;
+	pdev->devt = devt;
+
+	/* delay uevent until 'holders' subdir is created */
+	dev_set_uevent_suppress(pdev, 1);
+	err = device_add(pdev);
+	if (err)
+		goto out_put;
+
+	err = -ENOMEM;
+	p->holder_dir = kobject_create_and_add("holders", &pdev->kobj);
+	if (!p->holder_dir)
+		goto out_del;
+
+	dev_set_uevent_suppress(pdev, 0);
+	if (flags & ADDPART_FLAG_WHOLEDISK) {
+		err = device_create_file(pdev, &dev_attr_whole_disk);
+		if (err)
+			goto out_del;
+	}
+
+	/* everything is up and running, commence */
+	rcu_assign_pointer(ptbl->part[partno], p);
+
+	/* suppress uevent if the disk suppresses it */
+	if (!dev_get_uevent_suppress(ddev))
+		kobject_uevent(&pdev->kobj, KOBJ_ADD);
+
+	hd_ref_init(p);
+	return p;
+
+out_free_info:
+	free_part_info(p);
+out_free_stats:
+	free_part_stats(p);
+out_free:
+	kfree(p);
+	return ERR_PTR(err);
+out_del:
+	kobject_put(p->holder_dir);
+	device_del(pdev);
+out_put:
+	put_device(pdev);
+	blk_free_devt(devt);
+	return ERR_PTR(err);
+}
+
 static bool disk_unlock_native_capacity(struct gendisk *disk)
 {
 	const struct block_device_operations *bdops = disk->fops;
@@ -523,9 +638,17 @@ rescan:
 
 		if (state->parts[p].has_info)
 			info = &state->parts[p].info;
-		part = add_partition(disk, p, from, size,
+
+		if (strnstr(saved_command_line, N_OTA_O_STR, strlen(saved_command_line)) ||
+			strnstr(saved_command_line, RECOVERY_MODE_STR, strlen(saved_command_line)))
+			part = add_partition(disk, p, from, size,
 				     state->parts[p].flags,
 				     &state->parts[p].info);
+		else
+			part = add_partition_Ex(disk, p, from, size,
+				     state->parts[p].flags,
+				     &state->parts[p].info, state->parts[p].readonly);
+
 		if (IS_ERR(part)) {
 			printk(KERN_ERR " %s: p%d could not be added: %ld\n",
 			       disk->disk_name, p, -PTR_ERR(part));

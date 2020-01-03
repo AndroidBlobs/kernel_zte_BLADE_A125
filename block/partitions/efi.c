@@ -710,6 +710,8 @@ int efi_partition(struct parsed_partitions *state)
 
 		put_partition(state, i+1, start * ssz, size * ssz);
 
+		state->parts[i + 1].readonly = (le64_to_cpu(ptes[i].attributes.type_guid_specific)) >> 12;
+
 		/* If this is a RAID volume, tell md */
 		if (!efi_guidcmp(ptes[i].partition_type_guid, PARTITION_LINUX_RAID_GUID))
 			state->parts[i + 1].flags = ADDPART_FLAG_RAID;

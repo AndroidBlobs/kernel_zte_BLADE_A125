@@ -15,6 +15,7 @@ struct parsed_partitions {
 		int flags;
 		bool has_info;
 		struct partition_meta_info info;
+		int readonly;
 	} *parts;
 	int next;
 	int limit;
