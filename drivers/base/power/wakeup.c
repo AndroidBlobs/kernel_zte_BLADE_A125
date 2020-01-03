@@ -19,6 +19,27 @@
 
 #include "power.h"
 
+
+#ifdef CONFIG_ZTE_BOOT_MODE
+#include "soc/qcom/socinfo.h"
+#endif
+
+/*
+notes: debug-way
+step1: echo -n "wakelockname" > /sys/module/wakeup/parameters/wakelock_debug
+step2: cat /proc/kmsg
+step3: echo -n "NULL" to cancel debug
+*/
+
+#define ZTE_WAKELOCK_DEBUG
+#include <linux/module.h>
+
+#ifdef ZTE_WAKELOCK_DEBUG
+char *wakelock_debug_zte;
+module_param_named(wakelock_debug, wakelock_debug_zte, charp, 0600);
+#endif
+
+
 /*
  * If set, the suspend/hibernate code will abort transitions to a sleep state
  * if wakeup events are registered during or immediately before the transition.
@@ -45,6 +66,28 @@ static void split_counters(unsigned int *cnt, unsigned int *inpr)
 	*cnt = (comb >> IN_PROGRESS_BITS);
 	*inpr = comb & MAX_IN_PROGRESS;
 }
+
+
+#ifndef DUMP_WAKELOCK
+#define DUMP_WAKELOCK
+#endif
+
+#ifdef DUMP_WAKELOCK
+#include <linux/timer.h>
+#include <linux/delay.h>
+#include <linux/module.h>
+
+/*
+notes: open-way
+echo 1 > /sys/module/wakeup/parameters/ws_debug_mask
+*/
+static int ws_debug_mask;
+module_param(ws_debug_mask, int, 0644);
+
+static void zte_dumplock_timer_func(unsigned long dummy);
+static DEFINE_TIMER(dumplock_timer, zte_dumplock_timer_func, 0, 0);
+#endif
+
 
 /* A preserved old value of the events counter. */
 static unsigned int saved_count;
@@ -436,6 +479,20 @@ static void wakeup_source_activate(struct wakeup_source *ws)
 	/* Increment the counter of events in progress. */
 	cec = atomic_inc_return(&combined_event_count);
 
+	
+	#ifdef DUMP_WAKELOCK
+	if (ws_debug_mask != 0)
+		pr_info("ZTE_PM_LOCK active %s\n", ws->name);
+	#endif
+
+	#ifdef ZTE_WAKELOCK_DEBUG
+	if (wakelock_debug_zte) {
+		if (strnstr(ws->name, wakelock_debug_zte, sizeof(wakelock_debug_zte)))
+			WARN(1, "ZTE_PM_WAKELOCK acquire wakelock %s:\n", ws->name);
+	}
+	#endif
+	
+
 	trace_wakeup_source_activate(ws->name, cec);
 }
 
@@ -562,6 +619,20 @@ static void wakeup_source_deactivate(struct wakeup_source *ws)
 	 */
 	cec = atomic_add_return(MAX_IN_PROGRESS, &combined_event_count);
 	trace_wakeup_source_deactivate(ws->name, cec);
+
+	
+	#ifdef DUMP_WAKELOCK
+	if (ws_debug_mask != 0)
+		pr_info("ZTE_PM_LOCK deactive %s\n", ws->name);
+	#endif
+
+	#ifdef ZTE_WAKELOCK_DEBUG
+	if (wakelock_debug_zte) {
+		if (strnstr(ws->name, wakelock_debug_zte, sizeof(wakelock_debug_zte)))
+			WARN(1, "ZTE_PM_WAKELOCK release wakelock %s:\n", ws->name);
+	}
+	#endif
+	
 
 	split_counters(&cnt, &inpr);
 	if (!inpr && waitqueue_active(&wakeup_count_wait_queue))
@@ -797,6 +868,33 @@ void pm_wakeup_clear(void)
 	pm_abort_suspend = false;
 }
 
+
+
+#ifdef DUMP_WAKELOCK
+/* period is dump_period seconds,In FTM mode,we should set it to 10s*/
+static int dump_period = 120;
+module_param(dump_period, int, 0644);
+
+void dump_wakeup_source_zte(void)
+{
+	struct wakeup_source *ws;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
+		if (ws->active)
+			pr_info("zte_dump wakesource %s is active\n", ws->name);
+	}
+	rcu_read_unlock();
+}
+
+static void zte_dumplock_timer_func(unsigned long dummy)
+{
+	dump_wakeup_source_zte();
+	mod_timer(&dumplock_timer, jiffies + msecs_to_jiffies(dump_period*1000));
+}
+#endif
+
+
 /**
  * pm_get_wakeup_count - Read the number of registered wakeup events.
  * @count: Address to store the value at.
@@ -820,6 +918,15 @@ bool pm_get_wakeup_count(unsigned int *count, bool block)
 			prepare_to_wait(&wakeup_count_wait_queue, &wait,
 					TASK_INTERRUPTIBLE);
 			split_counters(&cnt, &inpr);
+
+			
+			#ifdef DUMP_WAKELOCK
+				pr_info("[PM] %s for(;;)cnt= %d and wakesource count inpr= %d\n",
+								__func__, cnt, inpr);
+				dump_wakeup_source_zte();
+			#endif
+			
+
 			if (inpr == 0 || signal_pending(current))
 				break;
 
@@ -974,6 +1081,23 @@ static const struct file_operations wakeup_sources_stats_fops = {
 
 static int __init wakeup_sources_debugfs_init(void)
 {
+
+#ifdef DUMP_WAKELOCK
+#ifdef CONFIG_ZTE_BOOT_MODE
+	/*
+	 * Support for FTM & RECOVERY mode
+	 * 0: Normal mode
+	 * 1: FTM mode
+	 */
+	if (socinfo_get_ftm_flag() == 1) {
+		dump_period = 5;
+		pr_info("ZTE_PM set dump wakesource period to 10s  in FTM mode");
+	}
+#endif
+	mod_timer(&dumplock_timer, jiffies + msecs_to_jiffies(dump_period*1000));
+#endif
+
+
 	wakeup_sources_stats_dentry = debugfs_create_file("wakeup_sources",
 			S_IRUGO, NULL, NULL, &wakeup_sources_stats_fops);
 	return 0;
