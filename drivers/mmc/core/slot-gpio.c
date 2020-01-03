@@ -25,12 +25,28 @@ struct mmc_gpio {
 	bool override_cd_active_level;
 	char *ro_label;
 	char cd_label[0];
+	bool status;
 };
 
 static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 {
 	/* Schedule a card detection after a debounce timeout */
 	struct mmc_host *host = dev_id;
+	int status;
+
+	status = mmc_gpio_get_cd(host);
+	if (likely(status >= 0)) {
+		struct mmc_gpio *ctx;
+
+		ctx = host->slot.handler_priv;
+		if (status ^ ctx->status) {
+			pr_info("%s: slot status change detected (%d -> %d), GPIO_ACTIVE_%s\n",
+					mmc_hostname(host), ctx->status, status,
+					(host->caps2 & MMC_CAP2_CD_ACTIVE_HIGH) ?
+					"HIGH" : "LOW");
+			ctx->status = status;
+		}
+	}
 
 	host->trigger_card_event = true;
 	mmc_detect_change(host, msecs_to_jiffies(200));
@@ -156,6 +172,13 @@ void mmc_gpiod_request_cd_irq(struct mmc_host *host)
 		irq = -EINVAL;
 
 	if (irq >= 0) {
+		int status = mmc_gpio_get_cd(host);
+
+		if (likely(status >= 0))
+			ctx->status = status;
+		else
+			ctx->status = 0;
+
 		ret = devm_request_threaded_irq(&host->class_dev, irq,
 			NULL, mmc_gpio_cd_irqt,
 			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_ONESHOT,

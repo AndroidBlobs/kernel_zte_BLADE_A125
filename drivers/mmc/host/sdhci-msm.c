@@ -220,6 +220,17 @@ static const u32 tuning_block_128[] = {
 /* global to hold each slot instance for debug */
 static struct sdhci_msm_host *sdhci_slot[2];
 
+static int emmc_version_5_0 = 0;
+static int __init
+emmc_version_fn(char *str)
+{
+	if (str[0] == '7') {
+		emmc_version_5_0 = 1;
+	}
+	return 1;
+}
+__setup("emmc.hynix.version=", emmc_version_fn);
+
 static int disable_slots;
 /* root can write, others read */
 module_param(disable_slots, int, S_IRUGO|S_IWUSR);
@@ -1302,6 +1313,7 @@ static int sdhci_msm_dt_parse_vreg_info(struct device *dev,
 	char prop_name[MAX_PROP_SIZE];
 	struct sdhci_msm_reg_data *vreg;
 	struct device_node *np = dev->of_node;
+	struct sdhci_host *host = dev_get_drvdata(dev);
 
 	snprintf(prop_name, MAX_PROP_SIZE, "%s-supply", vreg_name);
 	if (!of_parse_phandle(np, prop_name, 0)) {
@@ -1322,6 +1334,14 @@ static int sdhci_msm_dt_parse_vreg_info(struct device *dev,
 			"qcom,%s-always-on", vreg_name);
 	if (of_get_property(np, prop_name, NULL))
 		vreg->is_always_on = true;
+	/*
+	 * Set VCC always on if it is Hynix and V5.0
+	 * to fix the issue that if vcc is off, the write protect function will be invalid
+	 */
+	if (host->mmc->index == 0 && !strcmp(vreg->name, "vdd") && emmc_version_5_0) {
+		vreg->is_always_on = true;
+		pr_info("%s emmc_version_5_0 = %d\n", mmc_hostname(host->mmc), emmc_version_5_0);
+	}
 
 	snprintf(prop_name, MAX_PROP_SIZE,
 			"qcom,%s-lpm-sup", vreg_name);
@@ -4015,8 +4035,10 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 			goto pltfm_free;
 		}
 
-		if (ret <= 2)
+		if (ret <= 2) {
 			sdhci_slot[ret-1] = msm_host;
+			host->slot_no = ret;
+		}
 
 		msm_host->pdata = sdhci_msm_populate_pdata(&pdev->dev,
 							   msm_host);

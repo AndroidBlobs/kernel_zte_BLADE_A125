@@ -1273,6 +1273,8 @@ void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 		sdhci_readw(host, SDHCI_TRANSFER_MODE),
 		sdhci_readw(host, SDHCI_COMMAND));
 	sdhci_writew(host, SDHCI_MAKE_CMD(cmd->opcode, flags), SDHCI_COMMAND);
+	dev_dbg(&host->mmc->class_dev, "%s: op %02x arg %08x flags %08x\n",
+		mmc_hostname(host->mmc), cmd->opcode, cmd->arg, cmd->flags);
 }
 EXPORT_SYMBOL_GPL(sdhci_send_command);
 
@@ -2016,6 +2018,9 @@ static void sdhci_do_set_ios(struct sdhci_host *host, struct mmc_ios *ios)
 	host->ops->set_bus_width(host, ios->bus_width);
 
 	ctrl = sdhci_readb(host, SDHCI_HOST_CONTROL);
+
+	dev_dbg(&host->mmc->class_dev, "%s: ios->clock=%u, ios->timing=%d\n",
+		mmc_hostname(host->mmc), ios->clock, ios->timing);
 
 	if ((ios->timing == MMC_TIMING_SD_HS ||
 	     ios->timing == MMC_TIMING_MMC_HS)
@@ -4132,6 +4137,11 @@ int sdhci_add_host(struct sdhci_host *host)
 	if (caps[1] & (SDHCI_SUPPORT_SDR104 | SDHCI_SUPPORT_SDR50 |
 		       SDHCI_SUPPORT_DDR50))
 		mmc->caps |= MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25;
+
+#if (defined CONFIG_BOARD_ELYSEE || defined CONFIG_BOARD_AYERS)
+	if (host->slot_no == 2)
+		caps[1] &= ~(SDHCI_SUPPORT_SDR104 | SDHCI_SUPPORT_DDR50);
+#endif
 
 	/* SDR104 supports also implies SDR50 support */
 	if (caps[1] & SDHCI_SUPPORT_SDR104) {
