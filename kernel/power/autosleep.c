@@ -11,6 +11,7 @@
 #include <linux/pm_wakeup.h>
 
 #include "power.h"
+#include <linux/fb.h>
 
 static suspend_state_t autosleep_state;
 static struct workqueue_struct *autosleep_wq;
@@ -85,6 +86,7 @@ void pm_autosleep_unlock(void)
 {
 	mutex_unlock(&autosleep_lock);
 }
+
 
 int pm_autosleep_set_state(suspend_state_t state)
 {
