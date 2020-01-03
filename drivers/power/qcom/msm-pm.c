@@ -75,6 +75,7 @@ enum msm_pc_count_offsets {
 	MSM_PC_NUM_COUNTERS,
 };
 
+
 static bool msm_pm_ldo_retention_enabled = true;
 static bool msm_pm_tz_flushes_cache;
 static bool msm_pm_ret_no_pll_switch;
@@ -398,6 +399,37 @@ static bool (*execute[MSM_PM_SLEEP_MODE_NR])(bool idle) = {
 	[MSM_PM_SLEEP_MODE_FASTPC] = msm_pm_fastpc,
 	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE] = msm_pm_power_collapse,
 };
+
+
+#ifdef ZTE_GPIO_DEBUG
+
+extern int msm_dump_gpios(struct seq_file *s, int curr_len, char *gpio_buffer);
+extern int pmic_dump_pins(struct seq_file *s, int curr_len, char *gpio_buffer);
+static char *gpio_sleep_status_info;
+
+int print_gpio_buffer(struct seq_file *s)
+{
+	if (gpio_sleep_status_info)
+		seq_printf(s, gpio_sleep_status_info);
+	else
+		seq_puts(s, "Device haven't suspended yet!\n");
+
+	return 0;
+}
+EXPORT_SYMBOL(print_gpio_buffer);
+
+int free_gpio_buffer(void)
+{
+	kfree(gpio_sleep_status_info);
+	gpio_sleep_status_info = NULL;
+
+	return 0;
+}
+EXPORT_SYMBOL(free_gpio_buffer);
+
+#endif
+
+
 
 /**
  * msm_cpu_pm_enter_sleep(): Enter a low power mode on current cpu
@@ -850,6 +882,7 @@ skip_save_imem:
 		}
 	}
 
+
 	if (pdev->dev.of_node)
 		of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 
@@ -905,6 +938,7 @@ int __init msm_pm_sleep_status_init(void)
 	if (registered)
 		return 0;
 	registered = true;
+
 
 	return platform_driver_register(&msm_cpu_status_driver);
 }
