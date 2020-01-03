@@ -904,6 +904,16 @@ int __udp6_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		if (ret > 0)
 			return ret;
 
+		if ((tcp_socket_debugfs & 0x00000001)) {    
+			if (!ip_hdr(skb))
+				pr_info("[IP] UDP RCV len = %hu, "
+					"Gpid:%d (%s) [%d (%s)] (%pI6:%hu <- %pI6:%hu)\n",
+					ulen,
+					current->group_leader->pid, current->group_leader->comm,
+					current->pid, current->comm,
+					&ip_hdr(skb)->daddr, ntohs(uh->dest),
+					&ip_hdr(skb)->saddr, ntohs(uh->source));
+		}
 		return 0;
 	}
 

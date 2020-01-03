@@ -130,6 +130,10 @@ EXPORT_SYMBOL(sysctl_udp_wmem_min);
 atomic_long_t udp_memory_allocated;
 EXPORT_SYMBOL(udp_memory_allocated);
 
+
+extern int tcp_socket_debugfs;
+
+
 #define MAX_UDP_PORTS 65536
 #define PORTS_PER_CHAIN (MAX_UDP_PORTS / UDP_HTABLE_SIZE_MIN)
 
@@ -1672,7 +1676,15 @@ start_lookup:
 		hslot = &udp_table.hash2[hash2];
 		offset = offsetof(typeof(*sk), __sk_common.skc_portaddr_node);
 	}
-
+	if ((tcp_socket_debugfs & 0x00000001)) {       
+		pr_info("[IP] UDP RCV Multicasts len=%d , "
+			" %d (%s) [%d (%s)] (%pI4:%hu <- %pI4:%hu)\n",
+			ntohs(ip_hdr(skb)->tot_len),
+			current->group_leader->pid, current->group_leader->comm,
+			current->pid, current->comm,
+			&daddr, ntohs(uh->dest),
+			&saddr, ntohs(uh->source));
+		}
 	spin_lock(&hslot->lock);
 	sk_nulls_for_each_entry_offset(sk, node, &hslot->head, offset) {
 		if (__udp_is_mcast_sock(net, sk,
@@ -1768,6 +1780,17 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 	if (udp4_csum_init(skb, uh, proto))
 		goto csum_error;
 
+		if ((tcp_socket_debugfs & 0x00000001)) {       
+
+			pr_info("[IP] UDP RCV len=%d, "
+				"Gpid:%d (%s) [%d (%s)] (%pI4:%hu <- %pI4:%hu)\n",
+				ntohs(ip_hdr(skb)->tot_len),
+				current->group_leader->pid, current->group_leader->comm,
+				current->pid, current->comm,
+				&daddr, ntohs(uh->dest),
+				&saddr, ntohs(uh->source));
+		}
+
 	sk = skb_steal_sock(skb);
 	if (sk) {
 		struct dst_entry *dst = skb_dst(skb);
@@ -1800,6 +1823,16 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 						 inet_compute_pseudo);
 
 		ret = udp_queue_rcv_skb(sk, skb);
+		if ((tcp_socket_debugfs & 0x00000001)) {       
+
+			pr_info("[IP] UDP RCV len = %hu, "
+				" %d (%s) [%d (%s)] (%pI4:%hu <- %pI4:%hu)\n",
+				ulen,
+				current->group_leader->pid, current->group_leader->comm,
+				current->pid, current->comm,
+				&daddr, ntohs(uh->dest),
+				&saddr, ntohs(uh->source));
+		}
 		sock_put(sk);
 
 		/* a return value > 0 means to resubmit the input, but
