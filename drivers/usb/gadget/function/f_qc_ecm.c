@@ -950,7 +950,7 @@ ecm_qc_bind(struct usb_configuration *c, struct usb_function *f)
 				ecm_qc_fs_notify_desc.bEndpointAddress;
 
 		f->ss_descriptors = usb_copy_descriptors(ecm_qc_ss_function);
-		if (!f->hs_descriptors)
+		if (!f->ss_descriptors)
 			goto fail;
 	}
 

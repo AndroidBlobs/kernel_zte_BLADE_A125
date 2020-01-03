@@ -706,6 +706,11 @@ static void ffs_epfile_async_io_complete(struct usb_ep *_ep,
 	schedule_work(&io_data->work);
 }
 
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+#ifdef ZTE_HOMEPHONE_ENABLE
+extern int is_diag_locked(void);
+#endif
+#endif
 #define MAX_BUF_LEN	4096
 static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 {
@@ -720,7 +725,14 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 
 	pr_debug("%s: len %zu, read %d\n", __func__, io_data->len,
 			io_data->read);
-
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+#ifdef ZTE_HOMEPHONE_ENABLE
+	if (is_diag_locked()) {
+		pr_debug("%s not allowed\n", __func__);
+		return 0;
+	}
+#endif
+#endif
 retry:
 	if (atomic_read(&epfile->error))
 		return -ENODEV;

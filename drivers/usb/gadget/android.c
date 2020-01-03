@@ -91,6 +91,13 @@ static const char longname[] = "Gadget Android";
 #define VENDOR_ID		0x18D1
 #define PRODUCT_ID		0x0001
 
+/* CDROM PIDs. */
+#define PRODUCT_ID_MS_CDROM   0x0360
+#define PRODUCT_ID_MS_CDROM_ADB   0x0359
+#define PRODUCT_ID_MS_CDROM_LOGO   0x0504
+#define PRODUCT_ID_MS_CDROM_ADB_LOGO   0x0501
+#define PRODUCT_ID_DIAG_ADB 0x0500
+
 #define ANDROID_DEVICE_NODE_NAME_LENGTH 11
 /* f_midi configuration */
 #define MIDI_INPUT_PORTS    1
@@ -284,6 +291,158 @@ static struct usb_device_descriptor device_desc = {
 	.bNumConfigurations   = 1,
 };
 
+
+/* OEM USB Attrs. */
+struct usb_parameters {
+	char noZtePrefix;
+	char enable_cdrom;
+	char forceSwitch;
+	char noSerialno;
+	char rebootFtm;
+};
+
+struct usb_parameters zte_usb_parameters = {
+	.noZtePrefix = 0,
+	.enable_cdrom = 0,
+	.forceSwitch = 0,
+	.noSerialno = 0,
+	.rebootFtm = 0,
+};
+
+struct pid_no_oem_prefix {
+	__u16 pid;
+	__u16 pid_no_prefix;
+};
+
+static struct pid_no_oem_prefix pid_no_zte_prefix[] = {
+	/* {pid, pid_no_prefix} */
+	{0x0504, 0x0360,},
+	{0x0501, 0x0359,},
+	{0x0500, 0x0213,},
+	{0x0496, 0x0502,},
+	{0x0421, 0x0279,},
+	{0x0420, 0x0278,},
+	{0x0419, 0x0217,},
+	{0x0418, 0x0216,},
+
+	{0x1350, 0x0212,},
+	{0x1351, 0x0211,},
+	{0x1352, 0x0285,},
+	{0x1353, 0x0226,},
+	{0x1354, 0x0214,},
+	{0x1355, 0x0215,},
+	{0x1365, 0x0274,},
+	{0x1373, 0x0503,},
+
+	{0x0306, 0x0321,},
+	{0x0307, 0x0322,},
+	{0x0308, 0x0422,},
+	{0x0310, 0x0323,},
+	{0x0311, 0x0324,},
+	{0x0519, 0x0524,},
+	{0x0522, 0x0523,},
+	{0x0319, 0x0320,},
+
+	/* Add more pid here if need. */
+};
+
+static int not_display_oem_prefix(void)
+{
+	return !!(zte_usb_parameters.noZtePrefix);
+}
+
+static void pid_not_display_oem_prefix(ushort *pid)
+{
+	int index;
+	int size = ARRAY_SIZE(pid_no_zte_prefix);
+	__u16 product_id = *pid;
+
+	for (index = 0; index < size; index++) {
+		if (pid_no_zte_prefix[index].pid == product_id) {
+			product_id = pid_no_zte_prefix[index].pid_no_prefix;
+			pr_debug("%s: 0x%x\n", __func__, product_id);
+			*pid = product_id;
+		}
+	}
+}
+
+/* FTM and usbmanutag. */
+static int ftm_mode = 0;
+static int got_manufacture_tag = 0;
+
+#define FTM_MODE_STR "androidboot.mode=ftm"
+int get_ftm_from_tag(void)
+{
+	if (strnstr(saved_command_line, FTM_MODE_STR, sizeof(saved_command_line)))
+		return 1;
+	else
+		return 0;
+}
+
+static int is_ftm_mode(void)
+{
+	return !!ftm_mode;
+}
+
+static int config_ftm_from_tag(void)
+{
+	if (is_ftm_mode())
+		return 0;
+
+	ftm_mode = get_ftm_from_tag();
+
+	pr_warn("usb: %s, %d: ftm_mode %s\n",
+	       __func__, __LINE__, is_ftm_mode()?"enable":"disable");
+	return 0;
+}
+
+static int is_usb_factory_mode(void)
+{
+	return !!got_manufacture_tag;
+}
+
+static void ftm_iSerialNumber_filter(struct usb_composite_dev *cdev)
+{
+	/* If tradefed case reboot ftmmode, do report usb serial number */
+	if (is_usb_factory_mode()
+		|| (zte_usb_parameters.noSerialno && !zte_usb_parameters.rebootFtm)) {
+		strings_dev[STRING_SERIAL_IDX].id = 0;
+		device_desc.iSerialNumber = 0;
+		if (cdev)
+			cdev->desc.iSerialNumber = device_desc.iSerialNumber;
+	}
+}
+
+static ssize_t ftm_tag_show(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	int i = 0;
+
+	i = scnprintf(buf, PAGE_SIZE, "%s\n", is_ftm_mode()?"enable":"disable");
+
+	return i;
+}
+
+static ssize_t manu_tag_show(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n", got_manufacture_tag ? "enable" : "disable");
+}
+
+static ssize_t manu_tag_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t size)
+{
+	if (!strncmp(buf, "enable", strlen("enable"))) {
+		pr_info("usb got_manufacture_tag.\n");
+		got_manufacture_tag = 1;
+	}
+
+	return size;
+}
+
 enum android_device_state {
 	USB_DISCONNECTED,
 	USB_CONNECTED,
@@ -291,6 +450,20 @@ enum android_device_state {
 	USB_SUSPENDED,
 	USB_RESUMED
 };
+/* Use Qualcomm's usb vid and pid if enters download due to panic. */
+void use_qualcomm_usb_product_id(void)
+{
+	if (!diag_dload) {
+		pr_debug("%s: unable to update product id\n", __func__);
+		return;
+	}
+
+	/*
+	 * 0x55 -> 01010101, used for verification in memory
+	 * which could be changed by modem
+	 */
+	diag_dload->dload_info_free[0] = 0x55;
+}
 
 static const char *pm_qos_to_string(enum android_pm_qos_state state)
 {
@@ -922,6 +1095,10 @@ static struct android_usb_function acm_function = {
 #define MAX_XPORT_STR_LEN 50
 static char rmnet_transports[MAX_XPORT_STR_LEN];
 
+/*init rmnet transports, 1/5*/
+static char rmnet_transports_init[MAX_XPORT_STR_LEN];
+/*end*/
+
 /*rmnet transport name string - "rmnet_hsic[,rmnet_hsusb]" */
 static char rmnet_xport_names[MAX_XPORT_STR_LEN];
 
@@ -958,7 +1135,14 @@ static int rmnet_function_bind_config(struct android_usb_function *f,
 	static int rmnet_initialized, ports;
 
 	if (!rmnet_initialized) {
-		strlcpy(buf, rmnet_transports, sizeof(buf));
+		/*init rmnet transports, 2/5*/
+		if (rmnet_transports_init[0]) {
+			strlcpy(buf, rmnet_transports_init, sizeof(buf));
+			pr_info("rmnet: Init transports %s\n", rmnet_transports_init);
+		} else
+			strlcpy(buf, rmnet_transports, sizeof(buf));
+		/*end*/
+
 		b = strim(buf);
 
 		strlcpy(xport_name_buf, rmnet_xport_names,
@@ -990,6 +1174,18 @@ static int rmnet_function_bind_config(struct android_usb_function *f,
 			ports = 0;
 			goto out;
 		}
+	/*init rmnet transports, 3/5*/
+	strlcpy(buf, rmnet_transports, sizeof(buf));
+	ports = 0;
+	b = strim(buf);
+	while (b) {
+		ctrl_name = strsep(&b, ",");
+		data_name = strsep(&b, ",");
+		if (ctrl_name && data_name) {
+			ports++;
+		}
+	}
+	/*end*/
 		rmnet_initialized = 1;
 	}
 
@@ -1050,9 +1246,25 @@ static struct device_attribute dev_attr_rmnet_xport_names =
 				rmnet_xport_names_show,
 				rmnet_xport_names_store);
 
+/*init rmnet transports, 4/5*/
+static ssize_t rmnet_transports_init_store(
+		struct device *device, struct device_attribute *attr,
+		const char *buff, size_t size)
+{
+	strlcpy(rmnet_transports_init, buff, sizeof(rmnet_transports_init));
+	return size;
+}
+
+static struct device_attribute dev_attr_rmnet_transports_init =
+				__ATTR(rmnet_transports_init, S_IWUSR,
+				NULL,
+				rmnet_transports_init_store);
+/*end*/
+
 static struct device_attribute *rmnet_function_attributes[] = {
 					&dev_attr_rmnet_transports,
 					&dev_attr_rmnet_xport_names,
+					&dev_attr_rmnet_transports_init, /*init rmnet transports, 5/5*/
 					NULL };
 
 static struct android_usb_function rmnet_function = {
@@ -2025,7 +2237,8 @@ static ssize_t dun_w_softap_enable_store(
 {
 	unsigned int dun_w_softap_enable;
 
-	sscanf(buff, "%u", &dun_w_softap_enable);
+	if (kstrtouint(buff, 10, &dun_w_softap_enable) < 0)
+		return -EINVAL;
 
 	gserial_dun_w_softap_enable(dun_w_softap_enable);
 
@@ -2055,12 +2268,33 @@ static struct device_attribute dev_attr_serial_xport_names =
 				serial_xport_names_show,
 				serial_xport_names_store);
 
+/* Init serial transports from init.vendor.usb.rc, at_port_mod. */
+#define SERIAL_TRANSPORTS_INIT_TIMEOUT msecs_to_jiffies(5000)
+#define DEFAULT_SERIAL_TRANSPORTS "smd,tty,smd"
+static DECLARE_COMPLETION(serial_transports_init);
+static char serial_transports_types[32] = {'\0'};
+static ssize_t transports_init_store(
+		struct device *pdev, struct device_attribute *attr,
+		const char *buff, size_t size)
+{
+	strlcpy(serial_transports_types, buff, sizeof(serial_transports_types));
+	complete(&serial_transports_init);
+	pr_info("%s : %s\n", __func__, serial_transports_types);
+	return size;
+}
+
+static struct device_attribute dev_attr_transports_init =
+				__ATTR(transports_init, S_IWUSR,
+				NULL,
+				transports_init_store);
+
 static struct device_attribute *serial_function_attributes[] = {
 					&dev_attr_transports,
 					&dev_attr_serial_xport_names,
 					&dev_attr_is_connected_flag,
 					&dev_attr_dun_w_softap_enable,
 					&dev_attr_dun_w_softap_active,
+					&dev_attr_transports_init, /* at_port_mod. */
 					NULL };
 
 static int serial_function_init(struct android_usb_function *f,
@@ -2097,9 +2331,27 @@ static int serial_function_bind_config(struct android_usb_function *f,
 	char *name, *xport_name = NULL;
 	char buf[32], *b, xport_name_buf[32], *tb;
 	int err = -1, i, ports = 0;
-	static int serial_initialized;
+	static int serial_initialized = 0;
 	struct serial_function_config *config = f->config;
-	strlcpy(buf, serial_transports, sizeof(buf));
+
+	/* Init serial transports, as transports type
+	can not be changed twice, at_port_mod. */
+	if (!serial_initialized) {
+		if (serial_transports_types[0] != '\0') {
+			strlcpy(buf, serial_transports_types, sizeof(buf));
+		} else {
+			pr_info("wait for serial_transports_init.\n");
+			err = wait_for_completion_timeout(&serial_transports_init,
+				SERIAL_TRANSPORTS_INIT_TIMEOUT);
+			if (!err) {
+				pr_warn("timeout waiting for serial transports init\n");
+				strlcpy(buf, DEFAULT_SERIAL_TRANSPORTS, sizeof(buf));
+			} else
+				strlcpy(buf, serial_transports_types, sizeof(buf));
+		}
+	} else
+		strlcpy(buf, serial_transports, sizeof(buf));
+
 	b = strim(buf);
 
 	strlcpy(xport_name_buf, serial_xport_names, sizeof(xport_name_buf));
@@ -2168,7 +2420,18 @@ static int serial_function_bind_config(struct android_usb_function *f,
 			goto err_gser_usb_get_function;
 		}
 	}
+	/* Get real ports number, as it has replaced serial_transports with
+	serial_transports_types if !serial_initialized, at_port_mod. */
+	strlcpy(buf, serial_transports, sizeof(buf));
+	ports = 0;
+	b = strim(buf);
 
+	while (b) {
+		name = strsep(&b, ",");
+		if (name) {
+			ports++;
+		}
+	}
 	serial_initialized = 1;
 
 bind_config:
@@ -2837,6 +3100,12 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	}
 
 	fsg_mod_data.removable[0] = true;
+
+	/* Default config, only one lun for cdrom. */
+	fsg_mod_data.ro[0] = true;
+	fsg_mod_data.cdrom[0] = true;
+	fsg_mod_data.luns = 1;
+
 	fsg_config_from_params(&m_config, &fsg_mod_data, fsg_num_buffers);
 	fsg_opts = fsg_opts_from_func_inst(config->f_ms_inst);
 	ret = fsg_common_set_num_buffers(fsg_opts->common, fsg_num_buffers);
@@ -3569,7 +3838,8 @@ static ssize_t remote_wakeup_store(struct device *pdev,
 	struct android_configuration *conf;
 	int enable = 0;
 
-	sscanf(buff, "%d", &enable);
+	if (kstrtoint(buff, 10, &enable) < 0)
+		return -EINVAL;
 
 	pr_debug("android_usb: %s remote wakeup\n",
 			enable ? "enabling" : "disabling");
@@ -3611,6 +3881,42 @@ functions_show(struct device *pdev, struct device_attribute *attr, char *buf)
 	return buff - buf;
 }
 
+
+/* begin-1-diag security implementation */
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+extern int is_diag_locked(void);
+static bool is_valid_function(char *functions)
+{
+	char *name;
+	int len;
+
+	while (functions) {
+		name = strsep(&functions, ",");
+		len = strlen(name);
+
+		/* serial, only single smd channel is allowed. */
+		if (!name || (!strcmp(name, "serial") && strcmp(serial_transports, "smd") > 0)) {
+			pr_err("serial_transports = %s, include invalid function!\n", serial_transports);
+			return false;
+		}
+		/* rmnet, off when diag is locked. */
+		else if (!name || ((strnstr(name, "rmnet", len)/*add more here*/) && is_diag_locked())) {
+			pr_err("%s is not valid function!\n", name);
+			return false;
+		}
+		/* Below functions are not allowed too, in case of potential threat. */
+		if (!name || strnstr(name, "mbim", len) || strnstr(name, "ecm", len)
+			|| strnstr(name, "qdss", len) || strnstr(name, "ccid", len)
+			|| strnstr(name, "acm", len) || strnstr(name, "ncm", len)) {
+			pr_err("%s is not valid function!\n", name);
+			return false;
+		}
+	}
+	return true;
+}
+#endif
+/* end-1-diag security implementation */
+
 static ssize_t
 functions_store(struct device *pdev, struct device_attribute *attr,
 			       const char *buff, size_t size)
@@ -3620,6 +3926,16 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 	struct android_configuration *conf;
 	char *conf_str;
 	struct android_usb_function_holder *f_holder;
+
+/* begin-2-diag security implementation */
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+	char conf_str2[64] = {0};
+	char conf_str3[64] = {0};
+	char valid_fun_adb[64] = "mass_storage,adb";
+	char valid_fun[64] = "mass_storage";
+#endif
+/* end-2-diag security implementation */
+
 	char *name;
 	char buf[256], *b;
 	char aliases[256], *a;
@@ -3665,6 +3981,28 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 			conf = alloc_android_config(dev);
 
 		curr_conf = curr_conf->next;
+
+/* begin-3-diag security implementation */
+#ifdef ZTE_FEATURE_TF_SECURITY_SYSTEM
+		strlcpy(conf_str2, conf_str, sizeof(conf_str2));
+		strlcpy(conf_str3, conf_str, sizeof(conf_str3));
+		if (!is_valid_function(conf_str2)) {
+			if (strnstr(conf_str3, "adb", sizeof(conf_str3))) {
+				strlcpy(conf_str, valid_fun_adb, sizeof(conf_str));
+				device_desc.idVendor = 0x19d2;
+				device_desc.idProduct = 0x1351;
+			} else {
+				strlcpy(conf_str, valid_fun, sizeof(conf_str));
+				device_desc.idVendor = 0x19d2;
+				device_desc.idProduct = 0x1353;
+			}
+
+			if (unlikely(not_display_oem_prefix()))
+				pid_not_display_oem_prefix(&device_desc.idProduct);
+		}
+#endif
+/* end-3-diag security implementation */
+
 		while (conf_str) {
 			name = strsep(&conf_str, ",");
 			is_ffs = 0;
@@ -3706,6 +4044,7 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 	while (curr_conf->next != &dev->configs) {
 		conf = list_entry(curr_conf->next,
 				  struct android_configuration, list_item);
+
 		free_android_config(dev, conf);
 	}
 
@@ -3737,21 +4076,33 @@ static ssize_t enable_store(struct device *pdev, struct device_attribute *attr,
 	if (!cdev)
 		return -ENODEV;
 
+	/* For usbmanutag. */
+	if (is_usb_factory_mode() && !zte_usb_parameters.forceSwitch)
+		return -EBUSY;
+
 	mutex_lock(&dev->mutex);
 
-	sscanf(buff, "%d", &enabled);
+	if (kstrtoint(buff, 10, &enabled) < 0)
+		return -EINVAL;
+
+	pr_info("usb:%s, enabled=%d\n", __func__, enabled);
 	if (enabled && !dev->enabled) {
 		/*
 		 * Update values in composite driver's copy of
 		 * device descriptor.
 		 */
 		cdev->desc.idVendor = device_desc.idVendor;
+		if (unlikely(not_display_oem_prefix()))
+			pid_not_display_oem_prefix(&device_desc.idProduct);
 		cdev->desc.idProduct = device_desc.idProduct;
 		if (device_desc.bcdDevice)
 			cdev->desc.bcdDevice = device_desc.bcdDevice;
 		cdev->desc.bDeviceClass = device_desc.bDeviceClass;
 		cdev->desc.bDeviceSubClass = device_desc.bDeviceSubClass;
 		cdev->desc.bDeviceProtocol = device_desc.bDeviceProtocol;
+
+		ftm_iSerialNumber_filter(cdev);	/* None serialnumber in ftm and if manutag is set. */
+		pr_info("usb:%s idProduct=0x%x\n", __func__, device_desc.idProduct);
 
 		/* Audio dock accessory is unable to enumerate device if
 		 * pull-up is enabled immediately. The enumeration is
@@ -3793,6 +4144,200 @@ static ssize_t enable_store(struct device *pdev, struct device_attribute *attr,
 
 	mutex_unlock(&dev->mutex);
 
+	return size;
+}
+
+/* For the convenience of usb PID switch,
+* It's used to enable adb, or enable diag with scsi command.
+* Start_adbd has not been implemented yet.
+*/
+struct usb_function_info {
+	__u16 product_id;
+	char *clients;
+	char *transports;
+	char *functions;
+	int start_adbd;
+};
+
+/* PID related functions we supported, should be modified. */
+static struct usb_function_info function_info[] = {
+	{
+		.product_id	= 0x0112,
+		.clients	= "diag",
+		.transports	= NULL,
+		.functions	= "diag",
+		.start_adbd	= 0,
+	},
+	{
+		.product_id	= 0x1353, /*PID of MS*/
+		.clients	= NULL,
+		.transports	= NULL,
+		.functions	= "mass_storage",
+		.start_adbd	= 0,
+	},
+	{
+		.product_id	= 0x1350, /*PID of DIAG+MODEM+NMEA+MS*/
+		.clients	= "diag",
+		.transports	= "smd,tty",
+		.functions	= "diag,serial,mass_storage",
+		.start_adbd	= 0,
+	},
+	/* Add more info here if need. */
+};
+
+/* Get function info from pid, retuen 1(got), 0(miss). */
+static int get_function_info_from_pid(int pid, struct  usb_function_info **info)
+{
+	int index;
+	int size = ARRAY_SIZE(function_info);
+
+	for (index = 0; index < size; index++) {
+		if (pid == function_info[index].product_id) {
+			*info = &function_info[index];
+			pr_info("android_usb: find this pid %04x\n", pid);
+			return 1;
+		}
+	}
+	pr_err("android_usb: not support this pid %04x\n", pid);
+	return 0;
+}
+
+static ssize_t
+switch_pid_store(struct device *pdev, struct device_attribute *attr,
+			    const char *buff, size_t size)
+{
+	struct android_dev *dev = dev_get_drvdata(pdev);
+	struct usb_composite_dev *cdev = dev->cdev;
+	struct usb_function_info *info;
+	struct android_usb_function_holder *f_holder;
+	struct android_configuration *conf;
+	struct list_head *curr_conf = &dev->configs;
+	int target_pid = 0, got_info = 0;
+	char *name;
+	char buf[256], *b;
+	int err;
+	char aliases[256], *a;
+	int is_ffs;
+	int ffs_enabled = 0;
+
+	pr_info("android_usb: %s enter", __func__);
+	if (sscanf(buff, "%04x\n", &target_pid) != 1) {
+	    pr_err("android_usb: switch pid failed\n");
+	}
+	if (target_pid)
+		got_info = get_function_info_from_pid(target_pid, &info);
+
+	if (got_info) {
+		/* Remove former config. */
+		android_disable(dev);
+		list_for_each_entry(conf, &dev->configs, list_item)
+			list_for_each_entry(f_holder, &conf->enabled_functions,
+						enabled_list) {
+				if (f_holder->f->disable)
+					f_holder->f->disable(f_holder->f);
+			}
+		msleep(10);
+		/* write in new config. */
+		if (info->clients) {
+			strlcpy(diag_clients, info->clients, sizeof(diag_clients));
+		}
+		if (info->transports) {
+			strlcpy(serial_transports, info->transports, sizeof(serial_transports));
+		}
+		/* Change functions is more complex than change clients and transports. */
+		if (info->functions) {
+
+			pr_info("android_usb: %s enter, functions = %s", __func__, info->functions);
+
+			/* Clear previous enabled list. */
+			list_for_each_entry(conf, &dev->configs, list_item) {
+				while (conf->enabled_functions.next !=
+						&conf->enabled_functions) {
+					f_holder = list_entry(conf->enabled_functions.next,
+						typeof(*f_holder),
+						enabled_list);
+					f_holder->f->android_dev = NULL;
+					list_del(&f_holder->enabled_list);
+					kfree(f_holder);
+				}
+				INIT_LIST_HEAD(&conf->enabled_functions);
+			}
+
+			/* If the next not equal to the head, take it */
+			if (curr_conf->next != &dev->configs)
+				conf = list_entry(curr_conf->next,
+						  struct android_configuration, list_item);
+			else
+				conf = alloc_android_config(dev);
+
+			curr_conf = curr_conf->next;
+
+			strlcpy(buf, info->functions, sizeof(buf));
+			b = strim(buf);
+			while (b) {
+				name = strsep(&b, ",");
+				is_ffs = 0;
+				strlcpy(aliases, dev->ffs_aliases, sizeof(aliases));
+				a = aliases;
+
+				while (a) {
+					char *alias = strsep(&a, ",");
+
+					if (alias && !strcmp(name, alias)) {
+						is_ffs = 1;
+						break;
+					}
+				}
+				if (is_ffs) {
+					if (ffs_enabled)
+						continue;
+					err = android_enable_function(dev, conf, "ffs");
+					if (err)
+						pr_err("android_usb: Cannot enable ffs (%d)", err);
+					else
+						ffs_enabled = 1;
+					continue;
+				}
+
+				if (name) {
+					err = android_enable_function(dev, conf, name);
+					if (err)
+						pr_err("android_usb: %s Cannot enable '%s'", __func__, name);
+				}
+			}
+
+			/* Free uneeded configurations if exists. */
+			while (curr_conf->next != &dev->configs) {
+				conf = list_entry(curr_conf->next,
+				struct android_configuration, list_item);
+
+				free_android_config(dev, conf);
+			}
+		}
+
+		cdev->desc.idVendor = device_desc.idVendor;
+		cdev->desc.idProduct = target_pid;
+		cdev->desc.bcdDevice = device_desc.bcdDevice;
+		cdev->desc.bDeviceClass = device_desc.bDeviceClass;
+		cdev->desc.bDeviceSubClass = device_desc.bDeviceSubClass;
+		cdev->desc.bDeviceProtocol = device_desc.bDeviceProtocol;
+
+		/* Clear serial number */
+		strings_dev[STRING_SERIAL_IDX].id = 0;
+		device_desc.iSerialNumber = 0;
+		if (cdev)
+			cdev->desc.iSerialNumber = device_desc.iSerialNumber;
+
+		list_for_each_entry(conf, &dev->configs, list_item)
+			list_for_each_entry(f_holder, &conf->enabled_functions,
+						enabled_list) {
+				if (f_holder->f->enable)
+					f_holder->f->enable(f_holder->f);
+			}
+		android_enable(dev);
+	} else {
+		pr_err("android_usb: switch pid failed\n");
+	}
 	return size;
 }
 
@@ -3870,6 +4415,28 @@ field ## _store(struct device *pdev, struct device_attribute *attr,	\
 }									\
 static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, field ## _show, field ## _store);
 
+/* USB config attr. */
+#define OEM_USB_CONFIG_ATTR(field, format_string)			\
+static ssize_t								\
+field ## _show(struct device *dev, struct device_attribute *attr,	\
+		char *buf)						\
+{									\
+	return snprintf(buf, PAGE_SIZE,					\
+			format_string, zte_usb_parameters.field);	\
+}									\
+static ssize_t								\
+field ## _store(struct device *dev, struct device_attribute *attr,	\
+		const char *buf, size_t size)				\
+{									\
+	int value;							\
+	if (sscanf(buf, format_string, &value) == 1) {			\
+		zte_usb_parameters.field = value;			\
+		return size;						\
+	}								\
+	return -EPERM;							\
+}									\
+static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, field ## _show, field ## _store);
+
 #define DESCRIPTOR_ATTR(field, format_string)				\
 static ssize_t								\
 field ## _show(struct device *dev, struct device_attribute *attr,	\
@@ -3937,6 +4504,17 @@ static DEVICE_ATTR(state, S_IRUGO, state_show, NULL);
 static DEVICE_ATTR(remote_wakeup, S_IRUGO | S_IWUSR,
 		remote_wakeup_show, remote_wakeup_store);
 
+/* USB config interface. */
+static DEVICE_ATTR(switch_pid, S_IWUSR, NULL, switch_pid_store);
+static DEVICE_ATTR(ftm_tag, 0444, ftm_tag_show, NULL);
+static DEVICE_ATTR(manu_tag, 0664, manu_tag_show, manu_tag_store);
+
+OEM_USB_CONFIG_ATTR(enable_cdrom, "%d\n")
+OEM_USB_CONFIG_ATTR(noZtePrefix, "%d\n")
+OEM_USB_CONFIG_ATTR(forceSwitch, "%d\n")
+OEM_USB_CONFIG_ATTR(noSerialno, "%d\n")
+OEM_USB_CONFIG_ATTR(rebootFtm, "%d\n")
+
 static struct device_attribute *android_usb_attributes[] = {
 	&dev_attr_idVendor,
 	&dev_attr_idProduct,
@@ -3958,6 +4536,15 @@ static struct device_attribute *android_usb_attributes[] = {
 	&dev_attr_pm_qos_state,
 	&dev_attr_state,
 	&dev_attr_remote_wakeup,
+	/* USB config interface. */
+	&dev_attr_enable_cdrom,
+	&dev_attr_ftm_tag,
+	&dev_attr_manu_tag,
+	&dev_attr_switch_pid,
+	&dev_attr_noZtePrefix,
+	&dev_attr_forceSwitch,
+	&dev_attr_noSerialno,
+	&dev_attr_rebootFtm,
 	NULL
 };
 
@@ -4029,7 +4616,7 @@ static int android_bind(struct usb_composite_dev *cdev)
 		return id;
 	strings_dev[STRING_SERIAL_IDX].id = id;
 	device_desc.iSerialNumber = id;
-
+	ftm_iSerialNumber_filter(cdev);
 	dev->cdev = cdev;
 
 	/* Init the supported functions only once, on the first android_dev */
@@ -4441,6 +5028,8 @@ static int android_probe(struct platform_device *pdev)
 		goto err_probe;
 	}
 
+	/* Read ftm tag. */
+	config_ftm_from_tag();
 	/* pm qos request to prevent apps idle power collapse */
 	android_dev->curr_pm_qos_state = NO_USB_VOTE;
 	if (pdata && pdata->pm_qos_latency[0]) {

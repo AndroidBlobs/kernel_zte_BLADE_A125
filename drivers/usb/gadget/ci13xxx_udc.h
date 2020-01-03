@@ -178,6 +178,10 @@ struct ci13xxx {
 	int                        softconnect; /* is pull-up enable allowed */
 	unsigned long dTD_update_fail_count;
 	struct usb_phy            *transceiver; /* Transceiver struct */
+	/*xbl-20121128*/
+	struct switch_dev scsi_sdev;
+	bool start_adbd;
+	struct work_struct scsi_work;
 	bool                      skip_flush; /* skip flushing remaining EP
 						upon flush timeout for the
 						first EP. */
