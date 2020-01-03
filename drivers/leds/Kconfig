@@ -495,6 +495,13 @@ config LEDS_BLINKM
 	  This option enables support for the BlinkM RGB LED connected
 	  through I2C. Say Y to enable support for the BlinkM LED.
 
+config CONFIG_LEDS_QPNP
+	tristate "LED support for LED default"
+	depends on LEDS_CLASS && I2C
+	help
+	  This option enables support for the qcom RGB LED connected
+	  through I2C. Say Y to enable support for the qcom LED.
+
 config LEDS_QPNP
 	tristate "Support for QPNP LEDs"
 	depends on LEDS_CLASS && MSM_SPMI && OF_SPMI
@@ -552,12 +559,30 @@ config LEDS_VERSATILE
 	  This option enabled support for the LEDs on the ARM Versatile
 	  and RealView boards. Say Y to enabled these.
 
+config LEDS_MSM_QMI
+	tristate "LED Support for controlled by gpio"
+	default n
+	depends on ARCH_MSM
+	help
+	  ap send leds control to modem by qmi interface and modem control gpio.
+
 config LEDS_AW2013
 	tristate "LED support for AW2013"
 	depends on LEDS_CLASS && I2C
 	help
 	  This option enables support for the AW2013 RGB LED connected
 	  through I2C. Say Y to enable support for the AW2013 LED.
+
+config LEDS_AW9523B
+	tristate "LED support for AW9523B"
+	depends on LEDS_CLASS && I2C
+	help
+	  This option enables support for theAW9523B  LED connected
+	  through I2C. Say Y to enable support for the AW9523B LED.
+
+config ZTE_LCD_MAX_BRIGHTNESS_CTRL
+	bool "Support for max brightness ctrl avoid to 0 when thermal works"
+	default n
 
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"

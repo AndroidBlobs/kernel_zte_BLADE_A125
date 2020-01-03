@@ -10,6 +10,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#define pr_fmt(fmt) "[LED] %s(%d): " fmt, __func__, __LINE__
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -860,11 +861,153 @@ static int qpnp_wled_set(struct qpnp_led_data *led)
 	return 0;
 }
 
+
+bool red_led_opened = false;
+bool green_led_opened = false;
+struct qpnp_led_data *green_led = NULL;
+#ifdef ENABLE_SECOND_SPI_BL_CTRL
+struct qpnp_led_data *second_spi_backlight = NULL;
+#endif
+void update_led_state(struct qpnp_led_data *led)
+{
+	if (!strcmp(led->cdev.name, "red")) {
+		if (led->cdev.brightness) {
+			red_led_opened = true;
+		} else {
+			red_led_opened = false;
+		}
+		return;
+	}
+
+	if (!strcmp(led->cdev.name, "green")) {
+		if (led->cdev.brightness) {
+			green_led_opened = true;
+		} else {
+			green_led_opened = false;
+		}
+	}
+	pr_debug("LedState:red=%d green=%d\n", red_led_opened, green_led_opened);
+}
+
+bool led_all_open(void)
+{
+	if (red_led_opened && green_led_opened)
+		return true;
+	return false;
+}
+
+bool led_all_closed(void)
+{
+	if (!red_led_opened && !green_led_opened)
+		return true;
+	return false;
+}
+
+
+#ifdef ENABLE_SECOND_SPI_BL_CTRL
+int set_second_spi_backlight(int enable)
+{
+	int rc;
+	u8 val;
+
+	struct qpnp_led_data *led = second_spi_backlight;
+
+	pr_info("SPI %s %d\n", __func__, enable);
+
+	if (led == NULL) {
+		pr_err("%s  NULL point!\n", __func__);
+		return -EINVAL;
+	}
+
+	if (enable)
+		led->cdev.brightness = 20;
+	else
+		led->cdev.brightness = 0;
+
+	if (led->cdev.brightness) {
+
+		if (led->cdev.brightness < LED_MPP_CURRENT_MIN)
+			led->cdev.brightness = LED_MPP_CURRENT_MIN;
+		else if (led->cdev.brightness > LED_MPP_CURRENT_MAX)
+			led->cdev.brightness = LED_MPP_CURRENT_MAX;
+		else {
+			/*
+			 * PMIC supports LED intensity from 5mA - 40mA
+			 * in steps of 5mA. Brightness is rounded to
+			 * 5mA or nearest lower supported values
+			 */
+			led->cdev.brightness /= LED_MPP_CURRENT_MIN;
+			led->cdev.brightness *= LED_MPP_CURRENT_MIN;
+		}
+
+		val = (led->cdev.brightness / LED_MPP_CURRENT_MIN) - 1;
+
+		rc = qpnp_led_masked_write(led,
+				LED_MPP_SINK_CTRL(led->base),
+				LED_MPP_SINK_MASK, val);
+		if (rc) {
+			dev_err(&led->spmi_dev->dev,
+				"Failed to write sink control reg\n");
+			goto err_mpp_reg_write;
+		}
+
+		val = (led->mpp_cfg->source_sel & LED_MPP_SRC_MASK) |
+			(led->mpp_cfg->mode_ctrl & LED_MPP_MODE_CTRL_MASK);
+
+		rc = qpnp_led_masked_write(led,
+			LED_MPP_MODE_CTRL(led->base), LED_MPP_MODE_MASK,
+			val);
+		if (rc) {
+			dev_err(&led->spmi_dev->dev,
+					"Failed to write led mode reg\n");
+			goto err_mpp_reg_write;
+		}
+
+		rc = qpnp_led_masked_write(led,
+				LED_MPP_EN_CTRL(led->base), LED_MPP_EN_MASK,
+				LED_MPP_EN_ENABLE);
+		if (rc) {
+			dev_err(&led->spmi_dev->dev,
+					"Failed to write led enable reg\n");
+			goto err_mpp_reg_write;
+		}
+	} else {
+
+		rc = qpnp_led_masked_write(led,
+					LED_MPP_MODE_CTRL(led->base),
+					LED_MPP_MODE_MASK,
+					LED_MPP_MODE_DISABLE);
+		if (rc) {
+			dev_err(&led->spmi_dev->dev,
+					"Failed to write led mode reg\n");
+			goto err_mpp_reg_write;
+		}
+
+		rc = qpnp_led_masked_write(led,
+					LED_MPP_EN_CTRL(led->base),
+					LED_MPP_EN_MASK,
+					LED_MPP_EN_DISABLE);
+		if (rc) {
+			dev_err(&led->spmi_dev->dev,
+					"Failed to write led enable reg\n");
+			goto err_mpp_reg_write;
+		}
+	}
+
+	return 0;
+
+err_mpp_reg_write:
+	return rc;
+
+}
+#endif
 static int qpnp_mpp_set(struct qpnp_led_data *led)
 {
 	int rc;
 	u8 val;
 	int duty_us, duty_ns, period_us;
+
+	update_led_state(led);		
 
 	if (led->cdev.brightness) {
 		if (led->mpp_cfg->mpp_reg && !led->mpp_cfg->enable) {
@@ -905,6 +1048,7 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 		}
 		if (led->mpp_cfg->pwm_mode == PWM_MODE) {
 			/*config pwm for brightness scaling*/
+			if (!led->mpp_cfg->pwm_cfg->blinking) {		
 			period_us = led->mpp_cfg->pwm_cfg->pwm_period_us;
 			if (period_us > INT_MAX / NSEC_PER_USEC) {
 				duty_us = (period_us * led->cdev.brightness) /
@@ -921,12 +1065,18 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 					duty_ns,
 					period_us * NSEC_PER_USEC);
 			}
-			if (rc < 0) {
-				dev_err(&led->spmi_dev->dev, "Failed to " \
-					"configure pwm for new values\n");
-				goto err_mpp_reg_write;
-			}
+			} else {
+			/*blink only for blink=1 ,duty cycles*/
+			rc = pwm_config_us(led->mpp_cfg->pwm_cfg->pwm_dev,
+			0.5*1000000, 3*1000000);/*blink 0.5s per 3s .baseline*/
 		}
+		
+		if (rc < 0) {
+			dev_err(&led->spmi_dev->dev, "Failed to "
+				"configure pwm for new values\n");
+			goto err_mpp_reg_write;
+		}
+	}
 
 		if (led->mpp_cfg->pwm_mode != MANUAL_MODE)
 			pwm_enable(led->mpp_cfg->pwm_cfg->pwm_dev);
@@ -955,6 +1105,19 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 			}
 		}
 
+		
+		if (green_led) {
+			if (led_all_open()) {
+				rc = qpnp_led_masked_write(green_led,
+					LED_MPP_SINK_CTRL(green_led->base),
+					LED_MPP_SINK_MASK, 1);		/*10mA*/
+			} else {
+				rc = qpnp_led_masked_write(green_led,
+					LED_MPP_SINK_CTRL(green_led->base),
+					LED_MPP_SINK_MASK, 0);		/*5mA*/
+			}
+		}
+		
 		val = (led->mpp_cfg->source_sel & LED_MPP_SRC_MASK) |
 			(led->mpp_cfg->mode_ctrl & LED_MPP_MODE_CTRL_MASK);
 
@@ -982,6 +1145,7 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 				led->mpp_cfg->pwm_cfg->default_mode;
 			led->mpp_cfg->pwm_mode =
 				led->mpp_cfg->pwm_cfg->default_mode;
+			if (led_all_closed())	
 			pwm_disable(led->mpp_cfg->pwm_cfg->pwm_dev);
 		}
 		rc = qpnp_led_masked_write(led,
@@ -1025,9 +1189,10 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 
 		led->mpp_cfg->enable = false;
 	}
-
+#if 0		
 	if (led->mpp_cfg->pwm_mode != MANUAL_MODE)
 		led->mpp_cfg->pwm_cfg->blinking = false;
+#endif
 	qpnp_dump_regs(led, mpp_debug_regs, ARRAY_SIZE(mpp_debug_regs));
 
 	return 0;
@@ -2612,29 +2777,42 @@ restore:
 static void led_blink(struct qpnp_led_data *led,
 			struct pwm_config_data *pwm_cfg)
 {
+#if 0
 	int rc;
+#endif
 
 	flush_work(&led->work);
 	mutex_lock(&led->lock);
 	if (pwm_cfg->use_blink) {
 		if (led->cdev.brightness) {
 			pwm_cfg->blinking = true;
+#if 0		
 			if (led->id == QPNP_ID_LED_MPP)
 				led->mpp_cfg->pwm_mode = LPG_MODE;
 			else if (led->id == QPNP_ID_KPDBL)
 				led->kpdbl_cfg->pwm_mode = LPG_MODE;
 			pwm_cfg->mode = LPG_MODE;
+#endif
 		} else {
 			pwm_cfg->blinking = false;
+#if 0		
 			pwm_cfg->mode = pwm_cfg->default_mode;
 			if (led->id == QPNP_ID_LED_MPP)
 				led->mpp_cfg->pwm_mode = pwm_cfg->default_mode;
 			else if (led->id == QPNP_ID_KPDBL)
 				led->kpdbl_cfg->pwm_mode =
 						pwm_cfg->default_mode;
+#endif
 		}
+		led->cdev.blink_value = pwm_cfg->blinking; 
+		pr_debug("led_blink:%s  br=%d  blink=%d\n", led->cdev.name,
+				led->cdev.brightness, led->cdev.blink_value);	
 		pwm_free(pwm_cfg->pwm_dev);
 		qpnp_pwm_init(pwm_cfg, led->spmi_dev, led->cdev.name);
+		/*zte pm add  if adb blink test: please write blink firstly
+		then write brightness secondly. diff with 8974/8926*/
+		led->cdev.brightness = 0;
+#if 0
 		if (led->id == QPNP_ID_RGB_RED || led->id == QPNP_ID_RGB_GREEN
 				|| led->id == QPNP_ID_RGB_BLUE) {
 			rc = qpnp_rgb_set(led);
@@ -2652,6 +2830,7 @@ static void led_blink(struct qpnp_led_data *led,
 				dev_err(&led->spmi_dev->dev,
 				"KPDBL set brightness failed (%d)\n", rc);
 		}
+#endif
 	}
 	mutex_unlock(&led->lock);
 }
@@ -2679,6 +2858,8 @@ static ssize_t blink_store(struct device *dev,
 	case QPNP_ID_RGB_GREEN:
 	case QPNP_ID_RGB_BLUE:
 		led_blink(led, led->rgb_cfg->pwm_cfg);
+		pr_info("blink_store:%s br=%d blink=%d\n", led->cdev.name,
+		led->cdev.brightness, led->cdev.blink_value);
 		break;
 	case QPNP_ID_KPDBL:
 		led_blink(led, led->kpdbl_cfg->pwm_cfg);
@@ -3430,7 +3611,7 @@ static int qpnp_get_config_pwm(struct pwm_config_data *pwm_cfg,
 	pwm_cfg->use_blink =
 		of_property_read_bool(node, "qcom,use-blink");
 
-	if (pwm_cfg->mode == LPG_MODE || pwm_cfg->use_blink) {
+	if (0) {	
 		pwm_cfg->duty_cycles =
 			devm_kzalloc(&spmi_dev->dev,
 			sizeof(struct pwm_duty_cycles), GFP_KERNEL);
@@ -3902,12 +4083,22 @@ static int qpnp_leds_probe(struct spmi_device *spmi)
 
 		rc = of_property_read_string(temp, "linux,name",
 			&led->cdev.name);
+
+		
+		if (!strcmp(led->cdev.name, "green")) {
+			green_led = led;
+		}
+		
+
 		if (rc < 0) {
 			dev_err(&led->spmi_dev->dev,
 				"Failure reading led name, rc = %d\n", rc);
 			goto fail_id_check;
 		}
-
+	#ifdef ENABLE_SECOND_SPI_BL_CTRL
+		if (!strcmp(led->cdev.name, "second_spi-backlight"))
+			second_spi_backlight = led;
+	#endif
 		rc = of_property_read_u32(temp, "qcom,max-current",
 			&led->max_current);
 		if (rc < 0) {
@@ -4115,8 +4306,11 @@ static int qpnp_leds_probe(struct spmi_device *spmi)
 			__qpnp_led_work(led, led->cdev.brightness);
 			if (led->turn_off_delay_ms > 0)
 				qpnp_led_turn_off(led);
-		} else
+		} else {
 			led->cdev.brightness = LED_OFF;
+			/*led on for a long time when power on.factory request*/
+			__qpnp_led_work(led, led->cdev.brightness);
+		}
 
 		parsed_leds++;
 	}

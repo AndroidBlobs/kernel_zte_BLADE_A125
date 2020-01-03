@@ -88,7 +88,7 @@ static void led_gpio_brightness_set(struct led_classdev *led_cdev,
 		flash_now = 0;
 	}
 	CDBG("%s:flash_en=%d, flash_now=%d\n", __func__, flash_en, flash_now);
-
+#ifdef CONFIG_ZTE_USE_FLASH_GPIO_NOW
 	rc = gpio_direction_output(flash_led->flash_en, flash_en);
 	if (rc) {
 		pr_err("%s: Failed to set gpio %d\n", __func__,
@@ -101,6 +101,14 @@ static void led_gpio_brightness_set(struct led_classdev *led_cdev,
 		       flash_led->flash_now);
 		goto err;
 	}
+#else
+	rc = gpio_direction_output(flash_led->flash_en, flash_en);
+	if (rc) {
+		pr_err("%s: Failed to set gpio %d\n", __func__,
+		       flash_led->flash_en);
+		goto err;
+	}
+#endif
 	flash_led->brightness = brightness;
 err:
 	return;
@@ -172,6 +180,7 @@ int led_gpio_flash_probe(struct platform_device *pdev)
 		}
 	}
 
+#ifdef CONFIG_ZTE_USE_FLASH_GPIO_NOW
 	flash_led->flash_now = of_get_named_gpio(node, "qcom,flash-now", 0);
 	if (flash_led->flash_now < 0) {
 		dev_err(&pdev->dev,
@@ -187,14 +196,14 @@ int led_gpio_flash_probe(struct platform_device *pdev)
 			goto error;
 		}
 	}
-
+#endif
 	rc = of_property_read_string(node, "linux,name", &flash_led->cdev.name);
 	if (rc) {
 		dev_err(&pdev->dev, "%s: Failed to read linux name. rc = %d\n",
 			__func__, rc);
 		goto error;
 	}
-
+#ifdef CONFIG_ZTE_USE_FLASH_GPIO_NOW
 	rc = of_property_read_u32_array(node, "qcom,flash-seq-val",
 		array_flash_seq, 2);
 
@@ -262,6 +271,54 @@ int led_gpio_flash_probe(struct platform_device *pdev)
 		}
 
 	}
+#else
+	rc = of_property_read_u32_array(node, "qcom,flash-seq-val",
+		array_flash_seq, 1);
+
+	if (rc < 0) {
+		pr_err("%s get flash op seq failed %d\n",
+			__func__, __LINE__);
+		goto error;
+	}
+
+	rc = of_property_read_u32_array(node, "qcom,torch-seq-val",
+		array_torch_seq, 1);
+
+	if (rc < 0) {
+		pr_err("%s get torch op seq failed %d\n",
+			__func__, __LINE__);
+		goto error;
+	}
+
+	rc = of_property_read_string_index(node,
+		"qcom,op-seq", 0,
+			&seq_name);
+		CDBG("%s seq_name[%d] = %s\n", __func__, i,
+			seq_name);
+		if (rc < 0)
+			dev_err(&pdev->dev, "%s failed %d\n",
+				__func__, __LINE__);
+
+		if (!strcmp(seq_name, "flash_en")) {
+			flash_led->ctrl_seq[FLASH_EN].seq_type =
+				FLASH_EN;
+			CDBG("%s:%d seq_type[%d] %d\n", __func__, __LINE__,
+				i, flash_led->ctrl_seq[FLASH_EN].seq_type);
+			if (array_flash_seq[i] == 0)
+				flash_led->ctrl_seq[FLASH_EN].flash_on_val =
+					GPIO_OUT_LOW;
+			else
+				flash_led->ctrl_seq[FLASH_EN].flash_on_val =
+					GPIO_OUT_HIGH;
+
+			if (array_torch_seq[i] == 0)
+				flash_led->ctrl_seq[FLASH_EN].torch_on_val =
+					GPIO_OUT_LOW;
+			else
+				flash_led->ctrl_seq[FLASH_EN].torch_on_val =
+					GPIO_OUT_HIGH;
+		}
+#endif
 
 	platform_set_drvdata(pdev, flash_led);
 	flash_led->cdev.max_brightness = LED_FULL;

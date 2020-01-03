@@ -83,7 +83,12 @@ static ssize_t max_brightness_store(struct device *dev,
 		return ret;
 
 	led_cdev->max_brightness = state;
+	#ifdef CONFIG_ZTE_LCD_MAX_BRIGHTNESS_CTRL
+	if (led_cdev->usr_brightness_req > 0)
+		led_set_brightness(led_cdev, led_cdev->usr_brightness_req);
+	#else
 	led_set_brightness(led_cdev, led_cdev->usr_brightness_req);
+	#endif
 
 	return size;
 }
