@@ -115,7 +115,8 @@ void mdp3_dma_callback_enable(struct mdp3_dma *dma, int type)
 	}
 
 	if (dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_DSI_VIDEO ||
-		dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_LCDC) {
+		dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_LCDC  ||
+		dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_SPI_CMD) {
 		if (type & MDP3_DMA_CALLBACK_TYPE_VSYNC)
 			mdp3_irq_enable(MDP3_INTR_LCDC_START_OF_FRAME);
 	} else if (dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_DSI_CMD) {
@@ -199,7 +200,8 @@ static int mdp3_dma_callback_setup(struct mdp3_dma *dma)
 		rc = mdp3_set_intr_callback(MDP3_INTR_DMA_P_HISTO, &hist_cb);
 
 	if (dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_DSI_VIDEO ||
-		dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_LCDC)
+		dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_LCDC  ||
+		dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_SPI_CMD)
 		rc |= mdp3_set_intr_callback(MDP3_INTR_LCDC_START_OF_FRAME,
 					&vsync_cb);
 	else if (dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_DSI_CMD) {
@@ -660,6 +662,7 @@ static int mdp3_dmap_update(struct mdp3_dma *dma, void *buf,
 	struct mdss_panel_data *panel;
 	int rc = 0;
 	int retry_count = 2;
+	static int firsttime_enter = 0;/*add by yujianhua for lcd alarm startup blurred screen*/
 
 	ATRACE_BEGIN(__func__);
 	pr_debug("mdp3_dmap_update\n");
@@ -701,7 +704,14 @@ retry_dma_done:
 			}
 		}
 		dma->update_src_cfg = false;
+	/*add by yujianhua for lcd alarm startup blurred screen*/
+	} else if ((dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_DSI_VIDEO) && (firsttime_enter == 0)) {
+		pr_info("%s: dma_config_sourc only once,if occur twice then exist error\n", __func__);
+		dma->dma_config_source(dma);
+		firsttime_enter = 1;
+		/*msleep(1);add delay to reproduct problem*/
 	}
+	/*add by yujianhua for lcd alarm startup blurred screen end*/
 	mutex_lock(&dma->pp_lock);
 	if (dma->ccs_config.ccs_dirty)
 		mdp3_ccs_update(dma, true);
@@ -1263,6 +1273,23 @@ int dsi_cmd_stop(struct mdp3_intf *intf)
 	return 0;
 }
 
+int spi_cmd_config(struct mdp3_intf *intf, struct mdp3_intf_cfg *cfg)
+{
+	return 0;
+}
+
+int spi_cmd_start(struct mdp3_intf *intf)
+{
+	intf->active = true;
+	return 0;
+}
+
+int spi_cmd_stop(struct mdp3_intf *intf)
+{
+	intf->active = false;
+	return 0;
+}
+
 int mdp3_intf_init(struct mdp3_intf *intf)
 {
 	switch (intf->cfg.type) {
@@ -1280,6 +1307,11 @@ int mdp3_intf_init(struct mdp3_intf *intf)
 		intf->config = dsi_cmd_config;
 		intf->start = dsi_cmd_start;
 		intf->stop = dsi_cmd_stop;
+		break;
+	case MDP3_DMA_OUTPUT_SEL_SPI_CMD:
+		intf->config = spi_cmd_config;
+		intf->start = spi_cmd_start;
+		intf->stop = spi_cmd_stop;
 		break;
 
 	default:

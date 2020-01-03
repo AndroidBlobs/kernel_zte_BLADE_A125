@@ -60,7 +60,8 @@ enum fps_resolution {
 #define WRITEBACK_PANEL		10	/* Wifi display */
 #define LVDS_PANEL		11	/* LVDS */
 #define EDP_PANEL		12	/* LVDS */
-
+#define QPIC_PANEL          13      /* QPIC */
+#define SPI_PANEL		14	/* SPI */
 #define DSC_PPS_LEN		128
 
 /* HDR propeties count */
@@ -108,6 +109,7 @@ enum {
 	MDSS_PANEL_INTF_DSI,
 	MDSS_PANEL_INTF_EDP,
 	MDSS_PANEL_INTF_HDMI,
+	MDSS_PANEL_INTF_SPI,
 };
 
 enum {
@@ -428,6 +430,10 @@ struct edp_panel_info {
 	char frame_rate;	/* fps */
 };
 
+struct spi_panel_info {
+	char frame_rate;	/* fps */
+};
+
 /**
  * struct dynamic_fps_data - defines dynamic fps related data
  * @hfp: horizontal front porch
@@ -646,6 +652,9 @@ struct mdss_panel_info {
 	bool ulps_suspend_enabled;
 	bool panel_ack_disabled;
 	bool esd_check_enabled;
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	bool esd_check_enabled_second;
+#endif
 	bool allow_phy_power_off;
 	char dfps_update;
 	/* new requested fps before it is updated in hw */
@@ -734,6 +743,7 @@ struct mdss_panel_info {
 	struct lcd_panel_info lcdc;
 	struct fbc_panel_info fbc;
 	struct mipi_panel_info mipi;
+	struct spi_panel_info spi;
 	struct lvds_panel_info lvds;
 	struct edp_panel_info edp;
 
@@ -866,6 +876,9 @@ static inline u32 mdss_panel_get_framerate(struct mdss_panel_info *panel_info,
 		break;
 	case WRITEBACK_PANEL:
 		frame_rate = DEFAULT_FRAME_RATE;
+		break;
+	case SPI_PANEL:
+		frame_rate = panel_info->spi.frame_rate;
 		break;
 	case DTV_PANEL:
 		if (panel_info->dynamic_fps) {

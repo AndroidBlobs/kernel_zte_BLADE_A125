@@ -532,6 +532,7 @@ int mdp3_calc_ppp_res(struct msm_fb_data_type *mfd,
 		struct blit_req_list *lreq)
 {
 	struct mdss_panel_info *panel_info = mfd->panel_info;
+	int frame_rate = DEFAULT_FRAME_RATE;
 	int i, lcount = 0;
 	struct mdp_blit_req *req;
 	struct bpp_info bpp;
@@ -547,6 +548,8 @@ int mdp3_calc_ppp_res(struct msm_fb_data_type *mfd,
 
 	ATRACE_BEGIN(__func__);
 	lcount = lreq->count;
+	frame_rate = mdss_panel_get_framerate(panel_info,
+					FPS_RESOLUTION_HZ);
 	if (lcount == 0) {
 		pr_err("Blit with request count 0, continue to recover!!!\n");
 		ATRACE_END(__func__);
@@ -574,11 +577,11 @@ int mdp3_calc_ppp_res(struct msm_fb_data_type *mfd,
 		is_blit_optimization_possible(lreq, i);
 		req = &(lreq->req_list[i]);
 
-		if (req->fps > 0 && req->fps <= panel_info->mipi.frame_rate) {
+		if (req->fps > 0 && req->fps <= frame_rate) {
 			if (fps == 0)
 				fps = req->fps;
 			else
-				fps = panel_info->mipi.frame_rate;
+				fps = frame_rate;
 		}
 
 		mdp3_get_bpp_info(req->src.format, &bpp);
@@ -636,7 +639,7 @@ int mdp3_calc_ppp_res(struct msm_fb_data_type *mfd,
 	}
 
 	if (fps == 0)
-		fps = panel_info->mipi.frame_rate;
+		fps = frame_rate;
 
 	if (lreq->req_list[0].flags & MDP_SOLID_FILL) {
 		honest_ppp_ab = ppp_res.solid_fill_byte * 4;
@@ -1163,6 +1166,7 @@ int mdp3_ppp_start_blit(struct msm_fb_data_type *mfd,
 		return 0;
 
 	/* MDP width split workaround */
+
 	remainder = (req->dst_rect.w) % 16;
 	ret = ppp_get_bpp(req->dst.format, mfd->fb_imgType);
 	if (ret <= 0) {
@@ -1505,7 +1509,7 @@ static void mdp3_ppp_blit_handler(struct kthread_work *work)
 	}
 
 	if (!ppp_stat->bw_on) {
-		mdp3_ppp_turnon(mfd, 1);
+		rc = mdp3_ppp_turnon(mfd, 1);
 		if (rc < 0) {
 			mutex_unlock(&ppp_stat->config_ppp_mutex);
 			pr_err("%s: Enable ppp resources failed\n", __func__);

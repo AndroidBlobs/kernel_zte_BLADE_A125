@@ -27,6 +27,12 @@
 #ifdef TARGET_HW_MDSS_HDMI
 #include "mdss_dba_utils.h"
 #endif
+
+#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+#include "zte_lcd_common.h"
+extern struct mdss_dsi_ctrl_pdata *g_zte_ctrl_pdata;
+#endif
+
 #define DT_CMD_HDR 6
 #define MIN_REFRESH_RATE 48
 #define DEFAULT_MDP_TRANSFER_TIME 14000
@@ -180,7 +186,7 @@ static void mdss_dsi_panel_apply_settings(struct mdss_dsi_ctrl_pdata *ctrl,
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
 
-static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
+void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 			struct dsi_panel_cmds *pcmds, u32 flags)
 {
 	struct dcs_cmd_req cmdreq;
@@ -215,10 +221,34 @@ static struct dsi_cmd_desc backlight_cmd = {
 	led_pwm1
 };
 
+static char led_dcs1[3] = {0x51, 0x00, 0x00};	/* DTYPE_DCS_LWRITE */
+static struct dsi_cmd_desc backlight_cmd_dcsl = {
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(led_dcs1)},
+	led_dcs1
+};
+static char led_cabc53[2] = {0x53, 0x24};
+struct dsi_cmd_desc backlight_cmd_cabc53 = {
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_cabc53)},
+	led_cabc53
+};
+
+static char led_bf_open[4] = {0xBF, 0x91, 0x61, 0xF2};
+/* DTYPE_DCS_WRITE1 */
+static char led_bf_close[4] = {0xBF, 0x09, 0xB1, 0x7F};
+/* DTYPE_DCS_WRITE1 */
+static struct dsi_cmd_desc backlight_cmd_jd9161[] = {
+{
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(led_bf_open)},	led_bf_open},
+	{{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},	led_pwm1},
+	{{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(led_bf_close)},	led_bf_close}
+};
+
+
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
 	struct dcs_cmd_req cmdreq;
 	struct mdss_panel_info *pinfo;
+	static u32 bldcs_level_last = 0x0;/*add by yujianhua for last level*/
 
 	pinfo = &(ctrl->panel_data.panel_info);
 	if (pinfo->dcs_cmd_by_left) {
@@ -226,13 +256,84 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
-	pr_debug("%s: level=%d\n", __func__, level);
+/*add by yujianhua for cabc 53=2c after exit sleep set lcd brightness start*/
+#ifdef CONFIG_ZTE_LCD_DCSBL_CABC_GRADIENT
+	if (led_cabc53[1] == 0x2C) {
+		if (level != 0) {
+			memset(&cmdreq, 0, sizeof(cmdreq));
+			cmdreq.cmds = &backlight_cmd_cabc53;
+			cmdreq.cmds_cnt = 1;
+			cmdreq.flags = CMD_REQ_COMMIT;
+			cmdreq.rlen = 0;
+			cmdreq.cb = NULL;
+			pr_info("%s: set cabc53 = 2c\n", __func__);
+			mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+		}
+		led_cabc53[1] = 0x24;
+	}
 
-	led_pwm1[1] = (unsigned char)level;
+	if ((bldcs_level_last == 0) && (level != 0)) {
+		led_cabc53[1] = 0x2C;
+	}
+#endif
+/*add by yujianhua for cabc 53=2c after exit sleep set lcd brightness end*/
+
+/*add by yujianhua set cabc 53=24 before enter sleep for JD9161B*/
+#ifdef CONFIG_ZTE_LCD_CLOSE_CABC_GRADIENT_BEFORESLEEP
+	if (level == 0) {
+		memset(&cmdreq, 0, sizeof(cmdreq));
+		led_cabc53[1] = 0x0;
+		cmdreq.cmds = &backlight_cmd_cabc53;
+		cmdreq.cmds_cnt = 1;
+		cmdreq.flags = CMD_REQ_COMMIT;
+		cmdreq.rlen = 0;
+		cmdreq.cb = NULL;
+		pr_info("%s: set cabc53 = 00\n", __func__);
+		mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+	} else if ((level != 0) && (bldcs_level_last == 0)) {
+		memset(&cmdreq, 0, sizeof(cmdreq));
+		#ifdef CONFIG_ZTE_LCD_CABC_53H_CTRL
+		led_cabc53[1] = g_zte_ctrl_pdata->zte_lcd_ctrl->cabc_53h;
+		#else
+		led_cabc53[1] = 0x2C;
+		#endif
+		cmdreq.cmds = &backlight_cmd_cabc53;
+		cmdreq.cmds_cnt = 1;
+		cmdreq.flags = CMD_REQ_COMMIT;
+		cmdreq.rlen = 0;
+		cmdreq.cb = NULL;
+		pr_info("%s: set cabc53 = 0x%x\n", __func__, led_cabc53[1]);
+		mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+	}
+#endif
+/*add by yujianhua set cabc 53=24 before enter sleep for JD9161B end*/
+
+	bldcs_level_last = level;/*add by yujianhua for last level*/
+
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
-	cmdreq.cmds = &backlight_cmd;
+	if (ctrl->panel_data.panel_info.bl_max > 1023) {
+		led_dcs1[1] = (unsigned char)(level>>8)&0x0f;
+		led_dcs1[2] = (unsigned char)level&0xff;
+		cmdreq.cmds = &backlight_cmd_dcsl;
+	} else {
+		led_pwm1[1] = (unsigned char)level;
+		cmdreq.cmds = &backlight_cmd;
+	}
+
+	/*
+	memset(&cmdreq, 0, sizeof(cmdreq));
+		cmdreq.cmds = &backlight_cmd;
+	*/
+
 	cmdreq.cmds_cnt = 1;
+	if ((strnstr(&pinfo->panel_name[0], "zteHELITAI_jd9161_hsd_480_854_5.0Inch",
+		MDSS_MAX_PANEL_LEN) != NULL) ||
+		(strnstr(&pinfo->panel_name[0], "zteSKYWORTH_jd9161_cpt_480_854_5.0Inch",
+		MDSS_MAX_PANEL_LEN) != NULL)) {
+		cmdreq.cmds = backlight_cmd_jd9161;
+		cmdreq.cmds_cnt = 3;
+	}
 	cmdreq.flags = CMD_REQ_COMMIT;
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
@@ -403,7 +504,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		return rc;
 	}
 
-	pr_debug("%s: enable = %d\n", __func__, enable);
+	pr_info("[MSM_LCD]%s: enable = %d\n", __func__, enable);
 
 	if (enable) {
 		rc = mdss_dsi_request_gpios(ctrl_pdata);
@@ -480,7 +581,17 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
-		gpio_set_value((ctrl_pdata->rst_gpio), 0);
+		#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+			if (!ctrl_pdata->zte_lcd_ctrl->lcd_reset_high_sleeping) {
+				pr_info("%s: ctrl_pdata->rst_gpio=%d pull down\n",
+					__func__, ctrl_pdata->rst_gpio);
+				gpio_set_value((ctrl_pdata->rst_gpio), 0);
+			} else {
+				pr_info("[MSM_LCD]%s:lcd_reset_high_sleeping\n", __func__);
+			}
+		#else
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+		#endif
 		gpio_free(ctrl_pdata->rst_gpio);
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
@@ -777,6 +888,7 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_dsi_ctrl_pdata *sctrl = NULL;
+	u32 bl_preset;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -792,8 +904,24 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 	 * than it, the controller can malfunction.
 	 */
 
+	bl_preset = bl_level;
+
+#if defined(CONFIG_ZTE_LCD_COMMON_FUNCTION) && defined(CONFIG_ZTE_LCD_BACKLIGHT_LEVEL_CURVE)
+	bl_level = g_zte_ctrl_pdata->zte_lcd_ctrl->zte_convert_brightness(bl_level,
+					ctrl_pdata->panel_data.panel_info.bl_max);
+	if ((bl_level > pdata->panel_info.bl_max) && (bl_level != 0))
+		bl_level = pdata->panel_info.bl_max;
+
 	if ((bl_level < pdata->panel_info.bl_min) && (bl_level != 0))
 		bl_level = pdata->panel_info.bl_min;
+
+	pr_info("[MSM_LCD]%s:level=%d --> convert_level = %d\n", __func__, bl_preset, bl_level);
+#else
+	if ((bl_level < pdata->panel_info.bl_min) && (bl_level != 0))
+		bl_level = pdata->panel_info.bl_min;
+
+	pr_info("[MSM_LCD]%s: bl_level=%d\n", __func__, bl_level);
+#endif
 
 	switch (ctrl_pdata->bklt_ctrl) {
 	case BL_WLED:
@@ -883,6 +1011,13 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 
 	if (on_cmds->cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, on_cmds, CMD_REQ_COMMIT);
+
+	pr_info("[MSM_LCD]%s: on_cmds_cnt=%d\n", __func__, ctrl->on_cmds.cmd_cnt);
+	#if defined(CONFIG_ZTE_LCD_COMMON_FUNCTION) && defined(CONFIG_ZTE_LCD_CABC3_EXTREME_POWER_SAVE)
+	mutex_lock(&g_zte_ctrl_pdata->zte_lcd_ctrl->panel_sys_lock);
+	g_zte_ctrl_pdata->zte_lcd_ctrl->zte_set_cabc_mode(g_zte_ctrl_pdata->zte_lcd_ctrl->cabc_value);
+	mutex_unlock(&g_zte_ctrl_pdata->zte_lcd_ctrl->panel_sys_lock);
+	#endif
 
 	if (pinfo->compression_mode == COMPRESSION_DSC)
 		mdss_dsi_panel_dsc_pps_send(ctrl, pinfo);
@@ -991,6 +1126,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds, CMD_REQ_COMMIT);
 
+	pr_info("[MSM_LCD]%s: off_cmds_cnt=%d\n", __func__, ctrl->off_cmds.cmd_cnt);
 	mdss_dsi_panel_off_hdmi(ctrl, pinfo);
 
 end:
@@ -1048,7 +1184,7 @@ static void mdss_dsi_parse_trigger(struct device_node *np, char *trigger,
 }
 
 
-static int mdss_dsi_parse_dcs_cmds(struct device_node *np,
+int mdss_dsi_parse_dcs_cmds(struct device_node *np,
 		struct dsi_panel_cmds *pcmds, char *cmd_key, char *link_key)
 {
 	const char *data;
@@ -1691,9 +1827,12 @@ static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 
 	for (j = 0; j < ctrl->groups; ++j) {
 		for (i = 0; i < len; ++i) {
-			if (ctrl->return_buf[i] !=
-				ctrl->status_value[group + i])
+			if (ctrl->return_buf[i] != ctrl->status_value[group + i]) {
+					
+					pr_err("[MSM_LCD]ESD Read back value return_buf=0x%2x status_value=0x%2x\n",
+					ctrl->return_buf[i], ctrl->status_value[group + i]);
 				break;
+			}
 		}
 
 		if (i == len)
@@ -1703,7 +1842,66 @@ static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 
 	return false;
 }
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+static int mdss_dsi_cmp_panel_reg_v2_second(struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	int i, j;
+	int len = 0, *lenp;
+	int group = 0;
 
+	lenp = ctrl->status_valid_params ?: ctrl->status_cmds_rlen;
+
+	for (i = 0; i < ctrl->status_cmds_second.cmd_cnt; i++)
+		len += lenp[i];
+
+	for (j = 0; j < ctrl->groups; ++j) {
+		for (i = 0; i < len; ++i) {
+			if (ctrl->return_buf[i] != ctrl->status_value_second[group + i]) {
+					
+					pr_err("[MSM_LCD]ESD Read back second value return_buf=0x%2x status_value=0x%2x\n",
+					ctrl->return_buf[i], ctrl->status_value_second[group + i]);
+				break;
+			}
+		}
+
+		if (i == len)
+			return true;
+		group += len;
+	}
+
+	return false;
+}
+static int mdss_dsi_gen_read_status_second(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+	if (!mdss_dsi_cmp_panel_reg_v2_second(ctrl_pdata)) {
+		pr_err("%s: Read back value from panel is incorrect\n",
+							__func__);
+		return -EINVAL;
+	} else {
+		return 1;
+	}
+}
+#endif
+
+#ifdef CONFIG_ZTE_LCD_ESD_ERROR_CTRL
+static u8 esd_read_error_num = 0;
+static int mdss_dsi_gen_read_status(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+	if (!mdss_dsi_cmp_panel_reg_v2(ctrl_pdata)) {
+		esd_read_error_num++;
+		pr_err("[MSM_LCD]%s:esd_read_error_num=%d\n", __func__, esd_read_error_num);
+		if (esd_read_error_num >= 2) {
+			esd_read_error_num = 0;
+			return -EINVAL;
+		} else {
+			return 1;
+		}
+	} else {
+		esd_read_error_num = 0;
+		return 1;
+	}
+}
+#else
 static int mdss_dsi_gen_read_status(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	if (!mdss_dsi_cmp_panel_reg_v2(ctrl_pdata)) {
@@ -1714,6 +1912,8 @@ static int mdss_dsi_gen_read_status(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		return 1;
 	}
 }
+#endif
+
 
 static int mdss_dsi_nt35596_read_status(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -1907,7 +2107,10 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 
 	pinfo->esd_check_enabled = of_property_read_bool(np,
 		"qcom,esd-check-enabled");
-
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	pinfo->esd_check_enabled_second = of_property_read_bool(np,
+		"qcom,esd-check-enabled-second");
+#endif
 	if (!pinfo->esd_check_enabled)
 		return;
 
@@ -1921,6 +2124,10 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 			ctrl->status_mode = ESD_REG;
 			ctrl->check_read_status =
 				mdss_dsi_gen_read_status;
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+			ctrl->check_read_status_second =
+				mdss_dsi_gen_read_status_second;
+#endif
 		} else if (!strcmp(string, "reg_read_nt35596")) {
 			ctrl->status_mode = ESD_REG_NT35596;
 			ctrl->status_error_count = 0;
@@ -1946,7 +2153,11 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 	mdss_dsi_parse_dcs_cmds(np, &ctrl->status_cmds,
 			"qcom,mdss-dsi-panel-status-command",
 				"qcom,mdss-dsi-panel-status-command-state");
-
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	mdss_dsi_parse_dcs_cmds(np, &ctrl->status_cmds_second,
+			"qcom,mdss-dsi-panel-status-command-second",
+				"qcom,mdss-dsi-panel-status-command-state");
+#endif
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-panel-max-error-count",
 		&tmp);
 	ctrl->max_status_error_count = (!rc ? tmp : 0);
@@ -1983,7 +2194,21 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 				GFP_KERNEL);
 	if (!ctrl->status_value)
 		goto error1;
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	data = of_find_property(np, "qcom,mdss-dsi-panel-status-value-second", &tmp);
+	tmp /= sizeof(u32);
+	if (!IS_ERR_OR_NULL(data) && tmp != 0 && (tmp % status_len) == 0) {
+		ctrl->groups = tmp / status_len;
+	} else {
+		pr_err("%s: Error parse panel-status-value\n", __func__);
+		goto error1;
+	}
 
+	ctrl->status_value_second = kzalloc(sizeof(u32) * status_len * ctrl->groups,
+				GFP_KERNEL);
+	if (!ctrl->status_value_second)
+		goto error1;
+#endif
 	ctrl->return_buf = kcalloc(status_len * ctrl->groups,
 			sizeof(unsigned char), GFP_KERNEL);
 	if (!ctrl->return_buf)
@@ -1997,7 +2222,16 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 				__func__);
 		memset(ctrl->status_value, 0, ctrl->groups * status_len);
 	}
-
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	rc = of_property_read_u32_array(np,
+		"qcom,mdss-dsi-panel-status-value-second",
+		ctrl->status_value_second, ctrl->groups * status_len);
+	if (rc) {
+		pr_debug("%s: Error reading panel status values\n",
+				__func__);
+		memset(ctrl->status_value_second, 0, ctrl->groups * status_len);
+	}
+#endif
 	return;
 
 error2:
@@ -2655,6 +2889,13 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	pinfo->bl_min = (!rc ? tmp : 0);
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-bl-max-level", &tmp);
 	pinfo->bl_max = (!rc ? tmp : 255);
+#if defined(CONFIG_ZTE_LCD_COMMON_FUNCTION) && defined(CONFIG_ZTE_LCD_BACKLIGHT_LEVEL_CURVE)
+	if (pinfo->bl_max > 1023) {
+		pinfo->bl_max = 4095;
+	} else {
+		pinfo->bl_max = 255;
+	}
+#endif
 	ctrl_pdata->bklt_max = pinfo->bl_max;
 
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-interleave-mode", &tmp);
@@ -2878,5 +3119,10 @@ int mdss_dsi_panel_init(struct device_node *node,
 			mdss_dsi_panel_apply_display_setting;
 	ctrl_pdata->switch_mode = mdss_dsi_panel_switch_mode;
 	ctrl_pdata->panel_data.get_idle = mdss_dsi_panel_get_idle_mode;
+
+	#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+		zte_lcd_common_func(ctrl_pdata, node);
+	#endif
+
 	return 0;
 }

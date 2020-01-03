@@ -55,6 +55,8 @@
 #include "mdss_smmu.h"
 #include "mdss_mdp.h"
 #include "mdp3_ctrl.h"
+#include <soc/qcom/socinfo.h>
+#include "zte_lcd_common.h"
 
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MDSS_FB_NUM 3
@@ -1249,6 +1251,11 @@ static int mdss_fb_probe(struct platform_device *pdev)
 
 	mfd->split_fb_left = mfd->split_fb_right = 0;
 
+	if (mfd->panel.type == SPI_PANEL) {
+		mfd->fb_imgType = MDP_RGB_565;
+		pr_err("SPI set MDP_RGB_565 format\n");
+	}
+
 	mdss_fb_set_split_mode(mfd, pdata);
 	pr_info("fb%d: split_mode:%d left:%d right:%d\n", mfd->index,
 		mfd->split_mode, mfd->split_fb_left, mfd->split_fb_right);
@@ -1357,6 +1364,7 @@ static void mdss_fb_set_mdp_sync_pt_threshold(struct msm_fb_data_type *mfd,
 		mfd->mdp_sync_pt_data.threshold = 1;
 		mfd->mdp_sync_pt_data.retire_threshold = 0;
 		break;
+	case SPI_PANEL:
 	case MIPI_CMD_PANEL:
 		mfd->mdp_sync_pt_data.threshold = 1;
 		mfd->mdp_sync_pt_data.retire_threshold = 1;
@@ -1911,8 +1919,16 @@ static int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd)
 			if (IS_CALIB_MODE_BL(mfd))
 				mdss_fb_set_backlight(mfd, mfd->calib_mode_bl);
 			else if ((!mfd->panel_info->mipi.post_init_delay) &&
-				(mfd->unset_bl_level != U32_MAX))
+				(mfd->unset_bl_level != U32_MAX)) {
+				#ifdef CONFIG_ZTE_LCD_FLASH_SCREEN
+					if (zte_get_boot_mode() == 0)
+						mdss_fb_set_backlight(mfd, mfd->unset_bl_level);
+					else
+						mdss_fb_set_backlight(mfd, 0);
+				#else
 				mdss_fb_set_backlight(mfd, mfd->unset_bl_level);
+				#endif
+			}
 
 			/*
 			 * it blocks the backlight update between unblank and
@@ -5066,6 +5082,7 @@ int mdss_fb_suspres_panel(struct device *dev, void *data)
  * from the panel. The function sends the PANEL_ALIVE=0 status to HAL
  * layer.
  */
+extern struct mdss_dsi_ctrl_pdata *g_zte_ctrl_pdata;
 void mdss_fb_report_panel_dead(struct msm_fb_data_type *mfd)
 {
 	char *envp[2] = {"PANEL_ALIVE=0", NULL};
@@ -5077,6 +5094,9 @@ void mdss_fb_report_panel_dead(struct msm_fb_data_type *mfd)
 	}
 
 	pdata->panel_info.panel_dead = true;
+	#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+	g_zte_ctrl_pdata->zte_lcd_ctrl->lcd_esd_num++;
+	#endif
 	kobject_uevent_env(&mfd->fbi->dev->kobj,
 		KOBJ_CHANGE, envp);
 	pr_err("Panel has gone bad, sending uevent - %s\n", envp[0]);

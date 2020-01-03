@@ -2911,5 +2911,9 @@ static void __exit apds993x_exit(void)
 MODULE_DESCRIPTION("APDS993X ambient light + proximity sensor driver");
 MODULE_LICENSE("GPL");
 
+#ifdef CONFIG_DO_DEFERRED_INITCALL
+deferred_module_init(apds993x_init);
+#else
 module_init(apds993x_init);
+#endif
 module_exit(apds993x_exit);

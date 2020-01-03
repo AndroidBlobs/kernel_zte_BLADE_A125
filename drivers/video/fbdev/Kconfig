@@ -2501,3 +2501,16 @@ config FB_SSD1307
 	help
 	  This driver implements support for the Solomon SSD1307
 	  OLED controller over I2C.
+
+config MDSS_SPI_SECOND_PANEL
+	tristate "SECOND SPI PANEL ST7735S support"
+	depends on FB && SPI
+	depends on OF
+	depends on GPIOLIB
+	select FB_SYS_FOPS
+	select FB_SYS_FILLRECT
+	select FB_SYS_COPYAREA
+	select FB_SYS_IMAGEBLIT
+	help
+	  This driver implements support for the ST7735S
+	  LCD controller over SPI.

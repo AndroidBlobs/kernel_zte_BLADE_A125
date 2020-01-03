@@ -309,6 +309,11 @@ config BW_MONITOR
 	 it by registering the bus bandwidth as a sensor in
 	 thermal core framework.
 
+config ZTE_PWRKEY_16S_RESET
+	bool "pwrkey 16s reset"
+	help
+		This option enables pwrkey 16s reset.
+
 source "drivers/platform/msm/spmi/Kconfig"
 
 endmenu

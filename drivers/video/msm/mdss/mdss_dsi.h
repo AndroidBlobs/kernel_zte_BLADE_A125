@@ -24,6 +24,14 @@
 #include "mdss_dsi_cmd.h"
 #include "mdss_dsi_clk.h"
 
+
+
+#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+
+struct zte_lcd_ctrl_data;
+#endif
+
+
 #define MMSS_SERDES_BASE_PHY 0x04f01000 /* mmss (De)Serializer CFG */
 
 #define MIPI_OUTP(addr, data) writel_relaxed((data), (addr))
@@ -403,6 +411,9 @@ struct mdss_dsi_ctrl_pdata {
 	int (*set_col_page_addr)(struct mdss_panel_data *pdata, bool force);
 	int (*check_status) (struct mdss_dsi_ctrl_pdata *pdata);
 	int (*check_read_status) (struct mdss_dsi_ctrl_pdata *pdata);
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	int (*check_read_status_second)(struct mdss_dsi_ctrl_pdata *pdata);
+#endif
 	int (*cmdlist_commit)(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp);
 	void (*switch_mode) (struct mdss_panel_data *pdata, int mode);
 	struct mdss_panel_data panel_data;
@@ -482,7 +493,10 @@ struct mdss_dsi_ctrl_pdata {
 	u32 groups; /* several alternative values to compare */
 	u32 status_error_count;
 	u32 max_status_error_count;
-
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	struct dsi_panel_cmds status_cmds_second;
+	u32 *status_value_second;
+#endif
 	struct dsi_panel_cmds video2cmd;
 	struct dsi_panel_cmds cmd2video;
 
@@ -557,6 +571,11 @@ struct mdss_dsi_ctrl_pdata {
 	bool update_phy_timing; /* flag to recalculate PHY timings */
 
 	bool phy_power_off;
+
+#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+	struct zte_lcd_ctrl_data *zte_lcd_ctrl;
+#endif
+
 };
 
 struct dsi_status_data {

@@ -1144,6 +1144,44 @@ static int mdss_dsi_read_status(struct mdss_dsi_ctrl_pdata *ctrl)
 	return rc;
 }
 
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+static int mdss_dsi_read_status_second(struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	int i, rc, *lenp;
+	int start = 0;
+	struct dcs_cmd_req cmdreq;
+
+	rc = 1;
+	lenp = ctrl->status_valid_params ?: ctrl->status_cmds_rlen;
+
+	for (i = 0; i < ctrl->status_cmds_second.cmd_cnt; ++i) {
+		memset(&cmdreq, 0, sizeof(cmdreq));
+		cmdreq.cmds = ctrl->status_cmds_second.cmds + i;
+		cmdreq.cmds_cnt = 1;
+		cmdreq.flags = CMD_REQ_COMMIT | CMD_REQ_RX;
+		cmdreq.rlen = ctrl->status_cmds_rlen[i];
+		cmdreq.cb = NULL;
+		cmdreq.rbuf = ctrl->status_buf.data;
+
+		if (ctrl->status_cmds.link_state == DSI_LP_MODE)
+			cmdreq.flags  |= CMD_REQ_LP_MODE;
+		else if (ctrl->status_cmds.link_state == DSI_HS_MODE)
+			cmdreq.flags |= CMD_REQ_HS_MODE;
+
+		rc = mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+		if (rc <= 0) {
+			pr_err("%s: get status: fail\n", __func__);
+			return rc;
+		}
+
+		memcpy(ctrl->return_buf + start,
+			ctrl->status_buf.data, lenp[i]);
+		start += lenp[i];
+	}
+
+	return rc;
+}
+#endif
 
 /**
  * mdss_dsi_reg_status_check() - Check dsi panel status through reg read
@@ -1159,17 +1197,69 @@ int mdss_dsi_reg_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int ret = 0;
 	struct mdss_dsi_ctrl_pdata *sctrl_pdata = NULL;
-
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	static int index = 0;
+#endif
 	if (ctrl_pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return 0;
 	}
-
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	index++;
+#endif
 	pr_debug("%s: Checking Register status\n", __func__);
 
 	mdss_dsi_clk_ctrl(ctrl_pdata, ctrl_pdata->dsi_clk_handle,
 			  MDSS_DSI_ALL_CLKS, MDSS_DSI_CLK_ON);
-
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	if ((index % 2) ==  0) {
+		sctrl_pdata = mdss_dsi_get_other_ctrl(ctrl_pdata);
+		if (!mdss_dsi_sync_wait_enable(ctrl_pdata)) {
+			ret = mdss_dsi_read_status(ctrl_pdata);
+		} else {
+			/*
+			 * Read commands to check ESD status are usually sent at
+			 * the same time to both the controllers. However, if
+			 * sync_wait is enabled, we need to ensure that the
+			 * dcs commands are first sent to the non-trigger
+			 * controller so that when the commands are triggered,
+			 * both controllers receive it at the same time.
+			 */
+			if (mdss_dsi_sync_wait_trigger(ctrl_pdata)) {
+				if (sctrl_pdata)
+					ret = mdss_dsi_read_status(sctrl_pdata);
+				ret = mdss_dsi_read_status(ctrl_pdata);
+			} else {
+				ret = mdss_dsi_read_status(ctrl_pdata);
+				if (sctrl_pdata)
+					ret = mdss_dsi_read_status(sctrl_pdata);
+			}
+		}
+	} else {
+		sctrl_pdata = mdss_dsi_get_other_ctrl(ctrl_pdata);
+		if (!mdss_dsi_sync_wait_enable(ctrl_pdata)) {
+			ret = mdss_dsi_read_status_second(ctrl_pdata);
+		} else {
+			/*
+			 * Read commands to check ESD status are usually sent at
+			 * the same time to both the controllers. However, if
+			 * sync_wait is enabled, we need to ensure that the
+			 * dcs commands are first sent to the non-trigger
+			 * controller so that when the commands are triggered,
+			 * both controllers receive it at the same time.
+			 */
+			if (mdss_dsi_sync_wait_trigger(ctrl_pdata)) {
+				if (sctrl_pdata)
+					ret = mdss_dsi_read_status_second(sctrl_pdata);
+				ret = mdss_dsi_read_status_second(ctrl_pdata);
+			} else {
+				ret = mdss_dsi_read_status_second(ctrl_pdata);
+				if (sctrl_pdata)
+					ret = mdss_dsi_read_status_second(sctrl_pdata);
+			}
+		}
+	}
+#else
 	sctrl_pdata = mdss_dsi_get_other_ctrl(ctrl_pdata);
 	if (!mdss_dsi_sync_wait_enable(ctrl_pdata)) {
 		ret = mdss_dsi_read_status(ctrl_pdata);
@@ -1193,11 +1283,35 @@ int mdss_dsi_reg_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		}
 	}
 
+#endif
 	/*
 	 * mdss_dsi_read_status returns the number of bytes returned
 	 * by the panel. Success value is greater than zero and failure
 	 * case returns zero.
 	 */
+#ifdef CONFIG_ZTE_LCD_ESD_SECOND_CTRL
+	if ((index % 2) ==  0)  {
+		if (ret > 0) {
+			if (!mdss_dsi_sync_wait_enable(ctrl_pdata) ||
+				mdss_dsi_sync_wait_trigger(ctrl_pdata))
+				ret = ctrl_pdata->check_read_status(ctrl_pdata);
+			else if (sctrl_pdata)
+				ret = ctrl_pdata->check_read_status(sctrl_pdata);
+		} else {
+			pr_err("%s: Read status register returned error\n", __func__);
+		}
+	} else {
+		if (ret > 0) {
+			if (!mdss_dsi_sync_wait_enable(ctrl_pdata) ||
+				mdss_dsi_sync_wait_trigger(ctrl_pdata))
+				ret = ctrl_pdata->check_read_status_second(ctrl_pdata);
+			else if (sctrl_pdata)
+				ret = ctrl_pdata->check_read_status_second(sctrl_pdata);
+		} else {
+			pr_err("%s: Read status register returned error\n", __func__);
+		}
+	}
+#else
 	if (ret > 0) {
 		if (!mdss_dsi_sync_wait_enable(ctrl_pdata) ||
 			mdss_dsi_sync_wait_trigger(ctrl_pdata))
@@ -1207,7 +1321,7 @@ int mdss_dsi_reg_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	} else {
 		pr_err("%s: Read status register returned error\n", __func__);
 	}
-
+#endif
 	mdss_dsi_clk_ctrl(ctrl_pdata, ctrl_pdata->dsi_clk_handle,
 			  MDSS_DSI_ALL_CLKS, MDSS_DSI_CLK_OFF);
 	pr_debug("%s: Read register done with ret: %d\n", __func__, ret);

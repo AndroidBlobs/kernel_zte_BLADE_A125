@@ -1142,7 +1142,7 @@ static int ax88179_get_mac(struct usbnet *dev, u8 *buf)
 
 	memcpy(dev->net->perm_addr, dev->net->dev_addr, ETH_ALEN);
 
-	ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_NODE_ID, ETH_ALEN,
+	ret = ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_NODE_ID, ETH_ALEN,
 			  ETH_ALEN, dev->net->dev_addr);
 
 	if (ret < 0) {

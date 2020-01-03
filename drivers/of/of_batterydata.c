@@ -428,6 +428,7 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 
 	batt_id_kohm = of_batterydata_convert_battery_id_kohm(batt_id_uv,
 					rpull_up_kohm, vadc_vdd_uv);
+	pr_info("batt_id_kohm = %d\n", batt_id_kohm);
 	best_node = NULL;
 	best_delta = 0;
 	best_id_kohm = 0;
@@ -439,10 +440,12 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 		rc = of_batterydata_read_batt_id_kohm(node,
 						"qcom,batt-id-kohm",
 						&batt_ids);
+		pr_info("batt_ids.num = %d\n", batt_ids.num);
 		if (rc)
 			continue;
 		for (i = 0; i < batt_ids.num; i++) {
 			delta = abs(batt_ids.kohm[i] - batt_id_kohm);
+			pr_info("batt_ids.kohm[%d] = %d, delta = %d\n", i, batt_ids.kohm[i], delta);
 			if (delta < best_delta || !best_node) {
 				best_node = node;
 				best_delta = delta;

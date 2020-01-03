@@ -57,4 +57,49 @@ config FB_MSM_QPIC_PANEL_DETECT
 if FB_MSM_MDSS
 	source "drivers/video/msm/mdss/Kconfig"
 endif
+
+#/*zte add for lcd common function begin */
+config ZTE_LCD_COMMON_FUNCTION
+	bool "Support for ZTE lcd common function"
+	default y
+
+config ZTE_LCD_BACKLIGHT_LEVEL_CURVE
+	depends on ZTE_LCD_COMMON_FUNCTION
+	bool "Support for ZTE lcd backlight curve"
+
+config ZTE_LCD_REG_DEBUG
+	depends on ZTE_LCD_COMMON_FUNCTION
+	bool "Support lcd register debug in root version"
+
+config ZTE_LCD_GPIO_CTRL_POWER
+	depends on ZTE_LCD_COMMON_FUNCTION
+	bool "Support for ZTE gpio power ctrl"
+
+config ZTE_LCD_DCSBL_CABC_GRADIENT
+	depends on ZTE_LCD_COMMON_FUNCTION
+	bool "Support for ZTE dcs bl cabc gradient effect"
+
+config ZTE_LCD_ESD_ERROR_CTRL
+        bool "Support for lcd esd check error ctrl"
+        default n
+
+config ZTE_LCD_ESD_SECOND_CTRL
+        bool "Support for two register lcd esd check"
+        default n
+
+config ZTE_LCD_CABC_53H_CTRL
+        bool "Support for set cabc 53h ctrl"
+        default n
+
+config ZTE_LCD_CABC3_EXTREME_POWER_SAVE
+	depends on ZTE_LCD_COMMON_FUNCTION
+	bool "Support for ZTE extreme power save modem cabc"
+config ZTE_LCD_CLOSE_CABC_GRADIENT_BEFORESLEEP
+	depends on ZTE_LCD_COMMON_FUNCTION
+	bool "Support for ZTE close cabc gradient before sleep for jd9161b"
+
+config ZTE_LCD_FLASH_SCREEN
+        bool "Support for lcd flash screen in pv recveory poweroff mode"
+	default n
+#/*zte add for lcd common function end */
 endif

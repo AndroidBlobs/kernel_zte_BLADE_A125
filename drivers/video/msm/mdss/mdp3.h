@@ -85,6 +85,7 @@ enum {
 	MDP3_CLIENT_DSI = 1,
 	MDP3_CLIENT_PPP,
 	MDP3_CLIENT_IOMMU,
+	MDP3_CLINET_SPI,
 	MDP3_CLIENT_MAX,
 };
 
@@ -208,6 +209,8 @@ struct mdp3_hw_resource {
 	atomic_t active_intf_cnt;
 	u8 smart_blit_en;
 	bool solid_fill_vote_en;
+	int bklt_level;
+	int bklt_update;
 	struct list_head reg_bus_clist;
 	struct mutex reg_bus_lock;
 
@@ -285,7 +288,8 @@ int mdp3_layer_pre_commit(struct msm_fb_data_type *mfd,
 	struct file *file, struct mdp_layer_commit_v1 *commit);
 int mdp3_layer_atomic_validate(struct msm_fb_data_type *mfd,
 	struct file *file, struct mdp_layer_commit_v1 *commit);
-
+void mdss_spi_panel_bl_ctrl_update(struct mdss_panel_data *pdata,
+							u32 bl_level);
 #define MDP3_REG_WRITE(addr, val) writel_relaxed(val, mdp3_res->mdp_base + addr)
 #define MDP3_REG_READ(addr) readl_relaxed(mdp3_res->mdp_base + addr)
 #define VBIF_REG_WRITE(off, val) writel_relaxed(val, mdp3_res->vbif_base + off)

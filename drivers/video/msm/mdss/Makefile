@@ -43,6 +43,13 @@ mdss-dsi-objs += mdss_dsi_clk.o
 obj-$(CONFIG_FB_MSM_MDSS) += mdss-dsi.o
 obj-$(CONFIG_FB_MSM_MDSS) += mdss_panel.o
 
+ifeq ($(CONFIG_ZTE_LCD_COMMON_FUNCTION),y)
+mdss-dsi-objs += zte_lcd_common.o
+ifeq ($(CONFIG_ZTE_LCD_REG_DEBUG),y)
+mdss-dsi-objs += zte_lcd_reg_debug.o
+endif
+endif
+
 ifneq ($(CONFIG_FB_MSM_MDSS_MDP3), y)
 obj-$(CONFIG_FB_MSM_MDSS) += mdss_hdmi_util.o
 obj-$(CONFIG_FB_MSM_MDSS) += mdss_hdmi_edid.o
@@ -60,7 +67,10 @@ obj-$(CONFIG_FB_MSM_MDSS_HDMI_PANEL) += mdss_hdmi_audio.o
 obj-$(CONFIG_FB_MSM_MDSS_HDMI_MHL_SII8334) += mhl_sii8334.o mhl_msc.o
 ccflags-y += -DTARGET_HW_MDSS_HDMI
 endif
-
+ifeq ($(CONFIG_SPI_QUP),y)
+obj-$(CONFIG_FB_MSM_MDSS_SPI_PANEL) += mdss_spi_client.o
+obj-$(CONFIG_FB_MSM_MDSS_SPI_PANEL) += mdss_spi_panel.o
+endif
 obj-$(CONFIG_FB_MSM_MDSS_WRITEBACK) += mdss_wb.o
 
 mdss-qpic-objs := mdss_qpic.o mdss_fb.o mdss_qpic_panel.o

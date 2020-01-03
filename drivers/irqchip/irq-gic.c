@@ -290,8 +290,21 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 
 		pr_warning("%s: %d triggered %s\n", __func__,
 					i + gic->irq_offset, name);
+		
+		{
+			extern void print_irq_info(int i);
+			print_irq_info(irq);
+		}
+		
 		log_base_wakeup_reason(i + gic->irq_offset);
 	}
+
+	
+	{
+		extern void pm_show_rpm_stats(void);
+		pm_show_rpm_stats();
+	}
+	
 }
 
 static void gic_resume_one(struct gic_chip_data *gic)
